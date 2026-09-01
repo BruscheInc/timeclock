@@ -1,0 +1,12 @@
+{
+  "name": "timeclock",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Brusche Time Clock — GPS-geofenced clock in/out with payroll timesheets.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  }
+}

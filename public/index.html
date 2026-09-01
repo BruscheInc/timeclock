@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0a1512" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<title>Brusche Time Clock</title>
+<style>
+  :root{ --bg:#0a1512; --panel:#0f1f1a; --panel2:#0c1815; --line:#1f3a30; --ink:#e9fff6; --muted:#8fb3a6; --in:#39d98a; --out:#ff6b6b; --accent:#39d98a; --blue:#49b6ff; --mono:ui-monospace,Menlo,Consolas,monospace }
+  *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{padding-bottom:72px}
+  header{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,#0c1a16,#0a1512);border-bottom:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-top));display:flex;align-items:center;gap:10px}
+  .logo{font-weight:800}.logo b{color:var(--accent)}
+  .who{margin-left:auto;font-size:13px;color:var(--muted)} .who b{color:var(--ink)} .who a{color:var(--muted);font-size:12px;margin-left:8px}
+  .wrap{max-width:640px;margin:0 auto;padding:16px}
+  button{font:inherit;cursor:pointer}
+  .btn{background:var(--accent);color:#052012;border:none;border-radius:12px;padding:14px 18px;font-weight:800;font-size:16px}
+  .btn.sec{background:var(--panel);color:var(--ink);border:1px solid var(--line)} .btn.blue{background:var(--blue);color:#04121f}
+  .btn.wide{width:100%} .btn:active{transform:translateY(1px)} .btn:disabled{opacity:.5}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px}
+  .muted{color:var(--muted)} .mono{font-family:var(--mono)}
+  .clockcard{text-align:center;padding:26px 18px}
+  .status{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .bigstate{font-size:40px;font-weight:900;margin:6px 0 2px}
+  .bigstate.in{color:var(--in)} .bigstate.out{color:var(--out)}
+  .since{color:var(--muted);font-size:14px;margin-bottom:18px}
+  .punch{width:100%;padding:22px;border-radius:16px;font-size:22px;font-weight:900;border:none}
+  .punch.in{background:var(--in);color:#052012} .punch.out{background:var(--out);color:#2a0808}
+  .metric{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px} .metric:last-child{border:none}
+  .geo{font-size:12px;margin-top:12px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:11px;font-size:15px}
+  input.rate{width:100px} label{font-size:12px;color:var(--muted);display:block;margin:8px 0 3px}
+  table{width:100%;border-collapse:collapse;font-size:14px} td,th{padding:9px 6px;border-bottom:1px solid var(--line);text-align:left} th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em} td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .sectlabel{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:16px 2px 8px}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:86px;background:#08381f;color:#c9ffe4;border:1px solid #1c8a54;padding:11px 16px;border-radius:12px;font-size:14px;z-index:60;opacity:0;transition:.25s;pointer-events:none;max-width:90vw;text-align:center} .toast.show{opacity:1} .toast.bad{background:#3a1414;color:#ffd4d4;border-color:#8a1c1c}
+  nav.tabs{position:fixed;bottom:0;left:0;right:0;background:#0b1a16;border-top:1px solid var(--line);display:flex;z-index:30;padding-bottom:env(safe-area-inset-bottom)}
+  nav.tabs button{flex:1;background:none;border:none;color:var(--muted);padding:11px 0 12px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px} nav.tabs button .i{font-size:19px} nav.tabs button.on{color:var(--accent)}
+  .hidden{display:none!important} .center{text-align:center}
+  .keyprompt{max-width:400px;margin:14vh auto;padding:0 22px;text-align:center} .keyprompt input{width:100%;margin:12px 0}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700} .pill.ok{background:rgba(57,217,138,.16);color:var(--in)} .pill.no{background:rgba(255,107,107,.16);color:var(--out)}
+</style>
+</head>
+<body>
+
+<div id="keygate" class="keyprompt hidden">
+  <h2>⏱️ Brusche Time Clock</h2>
+  <p class="muted" id="gateMsg">Enter your username to sign in.</p>
+  <input id="keyInput" placeholder="username" autocapitalize="off" onkeydown="if(event.key==='Enter')saveKey()" />
+  <button class="btn wide" onclick="saveKey()">Sign in</button>
+</div>
+
+<div id="appwrap" class="hidden">
+<header>
+  <div class="logo">⏱️ <b>Time Clock</b></div>
+  <div class="who">👤 <b id="whoName">…</b> <span id="roleTag" class="muted"></span> <a href="#" onclick="signOut();return false">sign out</a></div>
+</header>
+
+<div class="wrap">
+  <!-- CLOCK TAB -->
+  <section id="tab-clock">
+    <div class="card clockcard">
+      <div class="status">You are currently</div>
+      <div class="bigstate" id="bigState">—</div>
+      <div class="since" id="sinceLbl"></div>
+      <button class="punch out" id="punchBtn" onclick="punch()">Loading…</button>
+      <div class="geo muted" id="geoLbl"></div>
+    </div>
+    <div class="card">
+      <div class="metric"><span class="muted">Today's hours</span><b id="todayHrs">—</b></div>
+      <div class="metric"><span class="muted">This week</span><b id="weekHrs">—</b></div>
+      <div class="metric"><span class="muted">This week's pay (est.)</span><b id="weekPay">—</b></div>
+    </div>
+  </section>
+
+  <!-- TEAM TAB (admin) -->
+  <section id="tab-team" class="hidden">
+    <div class="card">
+      <div class="row">
+        <button class="btn sec" onclick="setPeriod('this')">This week</button>
+        <button class="btn sec" onclick="setPeriod('last')">Last week</button>
+        <input type="date" id="from"><input type="date" id="to">
+        <button class="btn" onclick="loadTeam()">View</button>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="btn blue wide" onclick="exportCsv()">⬇︎ Export payroll CSV</button></div>
+    </div>
+    <div id="teamRes" class="card"><div class="muted center">Pick a period and tap View.</div></div>
+  </section>
+
+  <!-- SETUP TAB (admin) -->
+  <section id="tab-setup" class="hidden">
+    <div class="card">
+      <div class="sectlabel" style="margin-top:0">Work location (geofence)</div>
+      <div id="geoStatus" class="muted" style="font-size:13px;margin-bottom:8px"></div>
+      <div class="row">
+        <button class="btn" onclick="setGeoHere()">📍 Set to my current location</button>
+      </div>
+      <label>Allowed radius (meters)</label>
+      <div class="row"><input id="radius" type="number" class="rate" value="150"><button class="btn sec" onclick="saveRadius()">Save radius</button></div>
+      <label>Work week starts on</label>
+      <div class="row"><select id="weekStart">
+        <option value="1">Monday</option><option value="0">Sunday</option><option value="6">Saturday</option>
+      </select><button class="btn sec" onclick="saveWeekStart()">Save</button></div>
+    </div>
+    <div class="card">
+      <div class="sectlabel" style="margin-top:0">Employees & pay rates</div>
+      <div class="row">
+        <input id="empName" placeholder="Name (their login)"><input id="empRate" class="rate" type="number" placeholder="$/hr">
+        <button class="btn" onclick="addEmp()">Add</button>
+      </div>
+      <div id="empList" style="margin-top:12px"></div>
+      <div class="muted" style="font-size:12px;margin-top:10px" id="adminsLbl"></div>
+    </div>
+  </section>
+</div>
+
+<nav class="tabs">
+  <button id="nav-clock" class="on" onclick="showTab('clock')"><span class="i">⏱️</span>Clock</button>
+  <button id="nav-team" class="hidden" onclick="showTab('team')"><span class="i">👥</span>Team</button>
+  <button id="nav-setup" class="hidden" onclick="showTab('setup')"><span class="i">⚙️</span>Setup</button>
+</nav>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const KEY=(function(){try{const u=new URLSearchParams(location.search).get("key");if(u){localStorage.setItem("tc_key",u);return u;}return localStorage.getItem("tc_key")||"";}catch(e){return"";}})();
+const $=(id)=>document.getElementById(id);
+const money=(n)=>"$"+(Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=(s)=>String(s==null?"":s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m,bad){const t=$("toast");t.textContent=m;t.className="toast show"+(bad?" bad":"");clearTimeout(t._t);t._t=setTimeout(()=>t.className="toast",2600);}
+function saveKey(){const v=$("keyInput").value.trim();if(!v)return;try{localStorage.setItem("tc_key",v);}catch(e){}location.href=location.pathname+"?key="+encodeURIComponent(v);}
+function signOut(){try{localStorage.removeItem("tc_key");}catch(e){}location.href=location.pathname;}
+async function api(p,opts){opts=opts||{};const u=p+(p.includes("?")?"&":"?")+"key="+encodeURIComponent(KEY);const r=await fetch(u,opts);if(r.status===401){toast("Unauthorized",true);throw new Error("401");}return r.json();}
+let ROLE=null, USER="";
+
+if(!KEY){ $("keygate").classList.remove("hidden"); }
+else {(async()=>{
+  let role=null; try{ role=await (await fetch("/api/role?key="+encodeURIComponent(KEY))).json(); }catch(e){}
+  if(role&&role.ok){
+    ROLE=role.role; USER=role.user;
+    $("appwrap").classList.remove("hidden");
+    $("whoName").textContent=USER; $("roleTag").textContent=ROLE==="admin"?"· admin":"";
+    if(ROLE==="admin"){ $("nav-team").classList.remove("hidden"); $("nav-setup").classList.remove("hidden"); }
+    if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{})); }
+    refreshState(); setInterval(()=>{ if(!document.hidden && !$("tab-clock").classList.contains("hidden")) refreshState(); }, 30000);
+  } else {
+    try{localStorage.removeItem("tc_key");}catch(e){}
+    $("keygate").classList.remove("hidden"); const m=$("gateMsg"); if(m) m.textContent="That username isn't recognized — check with your manager.";
+  }
+})();}
+
+function showTab(t){ for(const x of ["clock","team","setup"]){ const s=$("tab-"+x); if(s)s.classList.toggle("hidden",x!==t); const n=$("nav-"+x); if(n)n.classList.toggle("on",x===t); }
+  if(t==="team"){ if(!$("from").value) setPeriod("this"); }
+  if(t==="setup"){ loadConfig(); loadEmps(); } }
+
+/* ---------- clock ---------- */
+async function refreshState(){
+  try{ const d=await api("/api/state");
+    const inNow=d.state==="in";
+    $("bigState").textContent=inNow?"CLOCKED IN":"CLOCKED OUT"; $("bigState").className="bigstate "+(inNow?"in":"out");
+    $("sinceLbl").textContent=d.since?("since "+new Date(d.since).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+(inNow?"":" (last out)")):"";
+    const b=$("punchBtn"); b.textContent=inNow?"Clock OUT":"Clock IN"; b.className="punch "+(inNow?"out":"in"); b.disabled=false;
+    $("todayHrs").textContent=(d.today_hours||0).toFixed(2)+" h";
+    $("geoLbl").innerHTML=d.geofence_set?`📍 Must be within ${d.radius_m} m of ${esc(d.company||"work")} to punch`:`⚠️ Geofence not set yet — ask an admin to set the work location`;
+    loadMyWeek();
+  }catch(e){}
+}
+function periodThisWeek(){ const now=new Date(); const day=(now.getDay()+6)%7; /*Mon=0*/ const from=new Date(now); from.setDate(now.getDate()-day); return {from:iso(from),to:iso(now)}; }
+function iso(d){ return d.toISOString().slice(0,10); }
+async function loadMyWeek(){
+  try{ const p=periodThisWeek(); const d=await api("/api/my-timesheet?from="+p.from+"&to="+p.to); const me=d.employees&&d.employees[0];
+    $("weekHrs").textContent=me?me.total_hours.toFixed(2)+" h"+(me.ot_hours?` (${me.ot_hours} OT)`:""):"0 h";
+    $("weekPay").textContent=me?money(me.gross_pay):"—";
+  }catch(e){}
+}
+function punch(){
+  const b=$("punchBtn"); b.disabled=true; const was=b.textContent; b.textContent="Getting location…";
+  if(!navigator.geolocation){ toast("This device can't provide location",true); b.disabled=false; b.textContent=was; return; }
+  navigator.geolocation.getCurrentPosition(async(pos)=>{
+    const {latitude,longitude,accuracy}=pos.coords;
+    try{ const r=await api("/api/punch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,lat:latitude,lng:longitude,accuracy})});
+      if(r.error){ toast(r.error,true); } else { toast("Clocked "+r.type.toUpperCase()+(r.distance_m!=null?` · ${r.distance_m} m away`:"")); }
+    }catch(e){ toast("Punch failed",true); }
+    b.disabled=false; refreshState();
+  },(err)=>{ toast("Location needed to punch: "+err.message,true); b.disabled=false; b.textContent=was; }, {enableHighAccuracy:true,timeout:12000,maximumAge:0});
+}
+
+/* ---------- team / timesheets (admin) ---------- */
+function setPeriod(which){ const now=new Date(); const day=(now.getDay()+6)%7; const mon=new Date(now); mon.setDate(now.getDate()-day);
+  if(which==="this"){ $("from").value=iso(mon); $("to").value=iso(now); }
+  else { const lm=new Date(mon); lm.setDate(mon.getDate()-7); const ls=new Date(mon); ls.setDate(mon.getDate()-1); $("from").value=iso(lm); $("to").value=iso(ls); }
+  loadTeam(); }
+async function loadTeam(){
+  const from=$("from").value, to=$("to").value; if(!from||!to){ toast("Pick dates",true); return; }
+  $("teamRes").innerHTML='<div class="muted center">Loading…</div>';
+  try{ const d=await api("/api/timesheet?from="+from+"&to="+to);
+    if(!d.employees||!d.employees.length){ $("teamRes").innerHTML='<div class="muted center">No hours in this period.</div>'; return; }
+    let tot=0,totp=0;
+    const rows=d.employees.map(e=>{ tot+=e.total_hours; totp+=e.gross_pay; return `<tr><td>${esc(e.employee)}${e.currently==="in"?' <span class="pill ok">in</span>':''}</td><td class="n">${e.reg_hours}</td><td class="n">${e.ot_hours}</td><td class="n"><b>${e.total_hours}</b></td><td class="n">${money(e.gross_pay)}</td></tr>`; }).join("");
+    $("teamRes").innerHTML=`<div class="muted" style="margin-bottom:8px">${from} → ${to} · week starts ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.week_start]}</div>
+      <table><thead><tr><th>Employee</th><th class="n">Reg</th><th class="n">OT</th><th class="n">Total</th><th class="n">Gross</th></tr></thead><tbody>${rows}</tbody>
+      <tfoot><tr><td><b>Total</b></td><td></td><td></td><td class="n"><b>${tot.toFixed(2)}</b></td><td class="n"><b>${money(totp)}</b></td></tr></tfoot></table>`;
+  }catch(e){ $("teamRes").innerHTML='<div class="muted center">Error loading.</div>'; }
+}
+function exportCsv(){ const from=$("from").value,to=$("to").value; if(!from||!to){toast("Pick dates",true);return;}
+  window.open("/api/export?from="+from+"&to="+to+"&key="+encodeURIComponent(KEY),"_blank"); }
+
+/* ---------- setup (admin) ---------- */
+async function loadConfig(){ try{ const c=await api("/api/config");
+  $("geoStatus").innerHTML=c.lat!=null?`✅ Set: ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)} · radius ${c.radius_m} m`:"⚠️ Not set — stand at the work site and tap the button below.";
+  $("radius").value=c.radius_m||150; $("weekStart").value=String(c.week_start??1);
+}catch(e){} }
+function setGeoHere(){ if(!navigator.geolocation){toast("No location on this device",true);return;}
+  toast("Getting location…"); navigator.geolocation.getCurrentPosition(async(pos)=>{
+    try{ await api("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,lat:pos.coords.latitude,lng:pos.coords.longitude})}); toast("Work location set ✓"); loadConfig(); }catch(e){toast("Failed",true);}
+  },(err)=>toast("Location error: "+err.message,true),{enableHighAccuracy:true,timeout:12000,maximumAge:0}); }
+async function saveRadius(){ try{ await api("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,radius_m:Number($("radius").value)||150})}); toast("Radius saved"); loadConfig(); }catch(e){} }
+async function saveWeekStart(){ try{ await api("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,week_start:Number($("weekStart").value)})}); toast("Saved"); }catch(e){} }
+async function loadEmps(){ try{ const d=await api("/api/employees");
+  $("adminsLbl").textContent="Admins (from settings): "+(d.admins||[]).join(", ");
+  $("empList").innerHTML=(d.employees&&d.employees.length)? d.employees.map(e=>`<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0">
+    <div><b>${esc(e.name)}</b> ${e.active===false?'<span class="pill no">inactive</span>':''}</div>
+    <div class="row"><span class="muted">$</span><input class="rate" type="number" value="${e.hourly_rate}" onchange="setRate('${esc(e.name)}',this.value)">
+    <button class="btn sec" onclick="toggleEmp('${esc(e.name)}',${e.active===false})">${e.active===false?'Enable':'Disable'}</button></div></div>`).join("")
+    : '<div class="muted">No employees yet — add one above.</div>';
+}catch(e){} }
+async function addEmp(){ const name=$("empName").value.trim(); const rate=Number($("empRate").value)||0; if(!name)return;
+  try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,hourly_rate:rate})}); $("empName").value="";$("empRate").value=""; toast("Added "+name); loadEmps(); }catch(e){} }
+async function setRate(name,val){ try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,hourly_rate:Number(val)||0})}); toast("Rate updated"); }catch(e){} }
+async function toggleEmp(name,makeActive){ try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,active:makeActive})}); loadEmps(); }catch(e){} }
+</script>
+</body>
+</html>
