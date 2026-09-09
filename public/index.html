@@ -294,12 +294,21 @@
     </div>
 
     <div class="card">
-      <div class="sectlabel" style="margin-top:0">Employees & pay rates</div>
-      <div class="row">
-        <input id="empName" class="grow" placeholder="Name (their login)"><input id="empRate" type="number" placeholder="$/hr" style="width:100px">
-        <button class="btn" onclick="addEmp()">Add</button>
+      <div class="sectlabel" style="margin-top:0">Add employee</div>
+      <input id="empName" placeholder="Name (this is their login)">
+      <div class="row" style="margin-top:9px">
+        <input id="empEmail" class="field" type="email" autocapitalize="off" placeholder="Email (optional)">
+        <input id="empPhone" class="field" type="tel" placeholder="Phone (optional)">
       </div>
-      <div id="empList" style="margin-top:14px"></div>
+      <div class="row" style="margin-top:9px">
+        <input id="empRate" type="number" placeholder="$/hr" style="width:110px">
+        <button class="btn grow" onclick="addEmp()">Add employee</button>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:8px">Add an email or phone so you can send them setup instructions with one tap.</div>
+    </div>
+    <div class="card">
+      <div class="sectlabel" style="margin-top:0">Team</div>
+      <div id="empList"></div>
       <div class="muted" style="font-size:12px;margin-top:12px" id="adminsLbl"></div>
     </div>
   </section>
@@ -336,6 +345,19 @@
     <button class="x" onclick="closeEdit()">×</button>
     <h3 id="editTitle">Punches</h3>
     <div class="sub" id="editSub"></div>
+  </div>
+</div>
+
+<!-- send setup instructions sheet (admin) -->
+<div class="scrim" id="sendScrim">
+  <div class="sheet">
+    <button class="x" onclick="closeSend()">×</button>
+    <h3>Send setup instructions</h3>
+    <div class="sub" id="sendSub"></div>
+    <div id="sendContact"></div>
+    <label>Message preview</label>
+    <textarea id="sendMsg" rows="9" style="font-size:13px;line-height:1.45"></textarea>
+    <div id="sendBtns" style="display:flex;flex-direction:column;gap:9px;margin-top:14px"></div>
   </div>
 </div>
 
@@ -611,18 +633,66 @@ async function saveSchedule(){ try{ await api("/api/config",{method:"POST",heade
     week_start:Number($("weekStart").value), pay_anchor:$("payAnchor").value||null, pay_period_days:Number($("payDays").value)||14, pay_offset_days:Number($("payOffset").value)||0, ot_multiplier:Number($("otMult").value)||1.5})});
   toast("Schedule saved","ok"); loadConfig();
 }catch(e){toast("Failed",true);} }
-async function loadEmps(){ try{ const d=await api("/api/employees");
+let EMPS=[];
+async function loadEmps(){ try{ const d=await api("/api/employees"); EMPS=d.employees||[];
   $("adminsLbl").textContent="Supervisors (from settings): "+(d.admins||[]).join(", ");
-  $("empList").innerHTML=(d.employees&&d.employees.length)? d.employees.map(e=>`<div class="prow">
-    <div class="grow"><b>${esc(e.name)}</b> ${e.active===false?'<span class="pill no">inactive</span>':''}</div>
-    <div class="row"><span class="muted">$</span><input type="number" value="${e.hourly_rate}" style="width:82px" onchange="setRate('${esc(e.name)}',this.value)">
-    <button class="btn sec sm" onclick="toggleEmp('${esc(e.name)}',${e.active===false})">${e.active===false?'Enable':'Disable'}</button></div></div>`).join("")
-    : '<div class="muted">No employees yet — add one above.</div>';
+  $("empList").innerHTML=(EMPS.length)? EMPS.map((e,i)=>{
+    const contact=[e.email?('✉︎ '+esc(e.email)):'', e.phone?('📱 '+esc(e.phone)):''].filter(Boolean).join('  ·  ') || '<span class="muted">no contact info</span>';
+    return `<div class="reqcard" style="background:var(--surface)">
+      <div class="top"><div><div class="who2">${esc(e.name)} ${e.active===false?'<span class="pill no">inactive</span>':''}</div>
+        <div class="when" style="font-size:12.5px">${contact}</div></div>
+        <div class="row"><span class="muted">$</span><input type="number" value="${e.hourly_rate}" style="width:78px" onchange="setRate('${esc(e.name)}',this.value)"></div></div>
+      <div class="acts"><button class="btn sm grow" onclick="openSend(${i})">📲 Send setup</button>
+        <button class="btn sec sm" onclick="editContact(${i})">Edit contact</button>
+        <button class="btn sec sm" onclick="toggleEmp('${esc(e.name)}',${e.active===false})">${e.active===false?'Enable':'Disable'}</button></div></div>`;
+  }).join("")
+    : '<div class="empty"><div class="ic">👥</div>No employees yet — add one above.</div>';
 }catch(e){} }
-async function addEmp(){ const name=$("empName").value.trim(); const rate=Number($("empRate").value)||0; if(!name)return;
-  try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,hourly_rate:rate})}); $("empName").value="";$("empRate").value=""; toast("Added "+name,"ok"); loadEmps(); }catch(e){} }
+async function addEmp(){ const name=$("empName").value.trim(); const rate=Number($("empRate").value)||0;
+  const email=$("empEmail").value.trim(), phone=$("empPhone").value.trim(); if(!name)return;
+  try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,hourly_rate:rate,email:email||null,phone:phone||null})});
+    $("empName").value="";$("empRate").value="";$("empEmail").value="";$("empPhone").value=""; toast("Added "+name,"ok"); loadEmps();
+  }catch(e){} }
 async function setRate(name,val){ try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,hourly_rate:Number(val)||0})}); toast("Rate updated","ok"); }catch(e){} }
 async function toggleEmp(name,makeActive){ try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,active:makeActive})}); loadEmps(); }catch(e){} }
+async function editContact(i){ const e=EMPS[i];
+  const email=prompt("Email for "+e.name+" (leave blank to clear):", e.email||""); if(email===null)return;
+  const phone=prompt("Phone for "+e.name+" (leave blank to clear):", e.phone||""); if(phone===null)return;
+  try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name:e.name,email:email.trim(),phone:phone.trim()})}); toast("Contact updated","ok"); loadEmps(); }catch(err){toast("Failed",true);} }
+
+/* ---------- send setup instructions ---------- */
+function empLink(name){ return location.origin+"/?key="+encodeURIComponent(name); }
+function setupMessage(name){ const link=empLink(name);
+  return `Hi ${name}, here's how to set up the Brusche Time Clock on your phone:\n\n`
+    +`1) Open this link on your phone (it signs you in):\n${link}\n\n`
+    +`2) Add it to your home screen so it opens like an app:\n`
+    +`   • iPhone (Safari): tap the Share button, then "Add to Home Screen", then "Add".\n`
+    +`   • Android (Chrome): tap the ⋮ menu, then "Add to Home screen" / "Install app".\n\n`
+    +`3) Open the Time Clock icon from your home screen and allow location — you have to be at work to clock in.\n\n`
+    +`Then just tap the big button to clock IN or OUT. Questions? Reply here.`;
+}
+let sendEmp=null;
+function openSend(i){ const e=EMPS[i]; sendEmp=e;
+  $("sendSub").textContent="Sends "+e.name+" their personal sign-in link and how to add the app to their home screen.";
+  $("sendMsg").value=setupMessage(e.name);
+  const c=$("sendContact"); c.innerHTML="";
+  if(!e.email && !e.phone){ c.innerHTML='<div class="pill warn" style="margin-bottom:10px">No email or phone on file — add one via “Edit contact”, or use Copy / Share below.</div>'; }
+  const btns=$("sendBtns"); const parts=[];
+  const subject="Set up the Brusche Time Clock";
+  if(e.phone){ parts.push(`<button class="btn ok wide" onclick="sendSms()">📱 Text it to ${esc(e.phone)}</button>`); }
+  if(e.email){ parts.push(`<button class="btn wide" onclick="sendEmail()">✉️ Email it to ${esc(e.email)}</button>`); }
+  if(navigator.share){ parts.push(`<button class="btn sec wide" onclick="sendShare()">🔗 Share…</button>`); }
+  parts.push(`<button class="btn sec wide" onclick="copyMsg()">📋 Copy message</button>`);
+  btns.innerHTML=parts.join("");
+  $("sendScrim").classList.add("show");
+}
+function closeSend(){ $("sendScrim").classList.remove("show"); }
+function sendSms(){ const msg=$("sendMsg").value; const num=(sendEmp.phone||"").replace(/[^0-9+]/g,"");
+  // iOS uses & separator, Android uses ? — &body works on both when a number is present
+  location.href="sms:"+num+"?&body="+encodeURIComponent(msg); }
+function sendEmail(){ const msg=$("sendMsg").value; location.href="mailto:"+encodeURIComponent(sendEmp.email)+"?subject="+encodeURIComponent("Set up the Brusche Time Clock")+"&body="+encodeURIComponent(msg); }
+async function sendShare(){ try{ await navigator.share({title:"Brusche Time Clock",text:$("sendMsg").value}); }catch(e){} }
+async function copyMsg(){ try{ await navigator.clipboard.writeText($("sendMsg").value); toast("Copied — paste it into any message","ok"); }catch(e){ toast("Couldn't copy",true); } }
 </script>
 </body>
 </html>
