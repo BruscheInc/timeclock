@@ -262,6 +262,7 @@
       <div class="lbl"><div class="d" id="tppLbl">—</div><div class="s" id="tppSub"></div><span class="payday" id="tppPayday"></span></div>
       <button class="nav" onclick="tppShift(1)">›</button>
     </div>
+    <button class="btn wide" onclick="openShiftPicker()" style="margin-bottom:14px">➕ Add hours for an employee</button>
     <div id="teamRes" class="card"><div class="muted center" style="padding:12px">Loading…</div></div>
     <button class="btn ok wide" onclick="exportCsv()">⬇︎ Export payroll CSV</button>
   </section>
@@ -273,7 +274,11 @@
     <div class="card">
       <div class="sectlabel" style="margin-top:0">Work location (geofence)</div>
       <div id="geoStatus" class="ink2" style="font-size:13.5px;margin-bottom:10px"></div>
-      <button class="btn wide" onclick="setGeoHere()">📍 Set to my current location</button>
+      <label style="margin-top:0">Set by address</label>
+      <input id="geoAddr" placeholder="Street, City, State ZIP">
+      <button class="btn wide" style="margin-top:9px" onclick="setGeoAddr()">📍 Set location from address</button>
+      <div class="muted" style="font-size:12px;margin:8px 0 4px">— or —</div>
+      <button class="btn sec wide" onclick="setGeoHere()">Use my current location instead</button>
       <label>Allowed radius (meters)</label>
       <div class="row"><input id="radius" type="number" class="field" value="150"><button class="btn sec" onclick="saveRadius()">Save</button></div>
     </div>
@@ -359,7 +364,8 @@
     <button class="x" onclick="closeShift()">×</button>
     <h3>Add hours</h3>
     <div class="sub" id="shiftSub"></div>
-    <div class="row" style="gap:6px;margin-bottom:6px">
+    <div id="shiftEmpWrap" class="hidden"><label style="margin-top:0">Employee</label><select id="shiftEmpSel"></select></div>
+    <div class="row" style="gap:6px;margin-bottom:6px;margin-top:10px">
       <button class="btn sec sm grow" id="modeRange" onclick="shiftMode('range')">By clock times</button>
       <button class="btn sec sm grow" id="modeHours" onclick="shiftMode('hours')">By total hours</button>
     </div>
@@ -658,10 +664,17 @@ function closeEdit(){ $("editScrim").classList.remove("show"); }
 
 /* ---------- add shift / hours (admin) ---------- */
 let shiftEmpName=null, shiftCurMode="range";
-function openShift(name){ shiftEmpName=name; $("shiftSub").textContent="Add a full shift for "+name+" — by clock times, or a set number of hours."; $("shiftDate").value=isoLocal(new Date()); shiftMode("range"); $("shiftScrim").classList.add("show"); }
+async function openShiftPicker(){ try{ if(!EMPS.length){ const d=await api("/api/employees"); EMPS=d.employees||[]; } }catch(e){} openShift(null); }
+function openShift(name){ shiftEmpName=name||null; const wrap=$("shiftEmpWrap"), sel=$("shiftEmpSel");
+  if(name){ wrap.classList.add("hidden"); $("shiftSub").textContent="Add a full shift for "+name+" — by clock times, or a set number of hours."; }
+  else { const list=EMPS.filter(e=>e.active!==false);
+    if(!list.length){ toast("Add an employee first (Setup)",true); return; }
+    wrap.classList.remove("hidden"); sel.innerHTML=list.map(e=>`<option value="${esc(e.name)}">${esc(e.name)}</option>`).join(""); $("shiftSub").textContent="Choose an employee, then add a full shift — by clock times, or a set number of hours."; }
+  $("shiftDate").value=isoLocal(new Date()); shiftMode("range"); $("shiftScrim").classList.add("show"); }
 function closeShift(){ $("shiftScrim").classList.remove("show"); }
 function shiftMode(m){ shiftCurMode=m; $("rangeFields").classList.toggle("hidden",m!=="range"); $("hoursFields").classList.toggle("hidden",m!=="hours"); $("modeRange").className="btn sm grow "+(m==="range"?"":"sec"); $("modeHours").className="btn sm grow "+(m==="hours"?"":"sec"); }
 async function saveShift(){
+  const emp = shiftEmpName || ($("shiftEmpSel") ? $("shiftEmpSel").value : ""); if(!emp){ toast("Choose an employee",true); return; }
   const date=$("shiftDate").value; if(!date){ toast("Pick a date",true); return; }
   let startISO,endISO;
   if(shiftCurMode==="range"){
@@ -673,19 +686,25 @@ async function saveShift(){
     const st=$("shiftHoursStart").value||"08:00"; const sd=new Date(date+"T"+st); const ed=new Date(sd.getTime()+h*3600000);
     startISO=sd.toISOString(); endISO=ed.toISOString();
   }
-  try{ const r=await api("/api/admin-shift",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,employee:shiftEmpName,start:startISO,end:endISO})});
-    if(r.error){ toast(r.error,true); return; } closeShift(); toast("Added "+r.hours+" h for "+shiftEmpName,"ok"); if(editEmp)openEmp(editEmp); loadTeam();
+  try{ const r=await api("/api/admin-shift",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,employee:emp,start:startISO,end:endISO})});
+    if(r.error){ toast(r.error,true); return; } closeShift(); toast("Added "+r.hours+" h for "+emp,"ok"); if(editEmp)openEmp(editEmp); loadTeam();
   }catch(e){ toast("Failed",true); }
 }
 
 /* ---------- Setup (admin) ---------- */
 async function loadConfig(){ try{ const c=await api("/api/config");
-  $("geoStatus").innerHTML=c.lat!=null?`✅ Set: ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)} · radius ${c.radius_m} m`:"⚠️ Not set — stand at the work site and tap the button below.";
+  $("geoStatus").innerHTML=c.lat!=null?`✅ ${c.address?esc(c.address):`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`}<br><span class="muted" style="font-size:12px">radius ${c.radius_m} m · ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}</span>`:"⚠️ Not set — enter an address or use your current location.";
+  if(c.address&&!$("geoAddr").value) $("geoAddr").value=c.address;
   $("radius").value=c.radius_m||150; $("weekStart").value=String(c.week_start??3);
   $("payAnchor").value=c.pay_anchor||"2026-09-02"; $("payDays").value=c.pay_period_days||14; $("payOffset").value=c.pay_offset_days??2; $("otMult").value=c.ot_multiplier||1.5;
   const wd=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]; const s=c.week_start??3; const e=(s+6)%7;
   $("cfgWeek").textContent=wd[s]+" → "+wd[e];
 }catch(e){} }
+async function setGeoAddr(){ const a=$("geoAddr").value.trim(); if(!a){ toast("Enter an address",true); return; }
+  toast("Locating address…");
+  try{ const r=await api("/api/geofence-address",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,address:a})});
+    if(r.error){ toast(r.error,true); return; } toast("Work location set ✓","ok"); loadConfig();
+  }catch(e){ toast("Couldn't set location",true); } }
 function setGeoHere(){ if(!navigator.geolocation){toast("No location on this device",true);return;}
   toast("Getting location…"); navigator.geolocation.getCurrentPosition(async(pos)=>{
     try{ await api("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,lat:pos.coords.latitude,lng:pos.coords.longitude})}); toast("Work location set ✓","ok"); loadConfig(); }catch(e){toast("Failed",true);}
