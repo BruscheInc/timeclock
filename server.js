@@ -82,13 +82,15 @@ async function migrate() {
   await db(`CREATE TABLE IF NOT EXISTS tk_requests (
     id BIGSERIAL PRIMARY KEY,
     employee TEXT NOT NULL,
-    type TEXT NOT NULL,               -- 'in' | 'out'
-    req_ts TIMESTAMPTZ NOT NULL,      -- the time the employee says they clocked
+    type TEXT NOT NULL,               -- 'in' | 'out' | 'shift'
+    req_ts TIMESTAMPTZ NOT NULL,      -- the time the employee says they clocked (shift start for 'shift')
+    end_ts TIMESTAMPTZ,               -- shift end (only for type 'shift')
     reason TEXT,
     status TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | denied
     decided_by TEXT, decided_at TIMESTAMPTZ, punch_id BIGINT,
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  await db(`ALTER TABLE tk_requests ADD COLUMN IF NOT EXISTS end_ts TIMESTAMPTZ`);
   await db(`CREATE INDEX IF NOT EXISTS idx_req_status ON tk_requests(status, created_at DESC)`);
 }
 async function getConfig() {
@@ -132,25 +134,35 @@ function weekStartOf(dateStr, weekStart) {
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /* ------------------------------------------------ Auth ------------------------------------------------ */
+// TIMECLOCK_ADMINS is a comma list of "Name" or "Name:password".
+//   - "Jose Perez"            → supervisor, no password required (legacy / until you set one)
+//   - "Jose Perez:s3cret"     → supervisor login requires name + that password
+// indexOf(":") is used (not split) so passwords may contain ":".
 function loadAdmins() {
   const out = [];
   for (const e of (process.env.TIMECLOCK_ADMINS || "").split(",").map((s) => s.trim()).filter(Boolean)) {
-    const [name, key] = e.split(":").map((x) => (x || "").trim());
-    if (name) out.push({ name, key: key || name });
+    const i = e.indexOf(":");
+    if (i === -1) out.push({ name: e.trim(), pass: null });
+    else out.push({ name: e.slice(0, i).trim(), pass: e.slice(i + 1).trim() || null });
   }
-  return out;
+  return out.filter((a) => a.name);
 }
 const ADMINS = loadAdmins();
-async function userInfo(key) {
+function adminByName(k) { const n = String(k || "").trim().toLowerCase(); return ADMINS.find((a) => a.name.toLowerCase() === n); }
+async function userInfo(key, pass) {
   const k = String(key || "").trim();
   if (!k) return null;
-  const a = ADMINS.find((a) => a.key.toLowerCase() === k.toLowerCase());
-  if (a) return { name: a.name, role: "admin" };
+  const a = adminByName(k);
+  if (a) {
+    if (!a.pass) return { name: a.name, role: "admin" };            // no password configured
+    return String(pass || "") === a.pass ? { name: a.name, role: "admin" } : null; // wrong/missing password → denied
+  }
   const r = await db(`SELECT name, active FROM tk_employees WHERE lower(name)=lower($1) OR lower(coalesce(login_key,''))=lower($1)`, [k]);
   if (r.rows[0] && r.rows[0].active !== false) return { name: r.rows[0].name, role: "employee" };
   return null;
 }
 function keyFrom(req) { return req.query.key || req.get("x-tc-key") || (req.body && req.body.key) || ""; }
+function passFrom(req) { return req.get("x-tc-pass") || (req.query && req.query.pass) || (req.body && req.body.pass) || ""; }
 
 /* ------------------------------------------------ Punch logic ------------------------------------------------ */
 async function lastPunch(emp) {
@@ -230,13 +242,19 @@ app.get("/", (_req, res) => res.sendFile(path.join(__dirname, "public", "index.h
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 async function guard(req, res, needAdmin) {
-  const u = await userInfo(keyFrom(req));
+  const u = await userInfo(keyFrom(req), passFrom(req));
   if (!u) { res.status(401).json({ error: "unauthorized" }); return null; }
   if (needAdmin && u.role !== "admin") { res.status(403).json({ error: "admin only" }); return null; }
   return u;
 }
 
-app.get("/api/role", async (req, res) => { const u = await userInfo(keyFrom(req)); res.json({ ok: !!u, user: u ? u.name : null, role: u ? u.role : null }); });
+app.get("/api/role", async (req, res) => {
+  const k = keyFrom(req);
+  const u = await userInfo(k, passFrom(req));
+  if (u) return res.json({ ok: true, user: u.name, role: u.role });
+  const a = adminByName(k);                          // name matched a supervisor but password was wrong/missing
+  res.json({ ok: false, admin: !!(a && a.pass) });
+});
 
 // ---- Employee: state + punch ----
 app.get("/api/state", async (req, res) => {
@@ -281,20 +299,31 @@ app.get("/api/pay-period", async (req, res) => {
 app.post("/api/request", async (req, res) => {
   const u = await guard(req, res); if (!u) return;
   try {
-    const { type, ts, reason } = req.body || {};
-    if (!["in", "out"].includes(type) || !ts) return res.status(400).json({ error: "type (in/out) and ts required" });
+    const { type, ts, end, reason } = req.body || {};
+    if (!["in", "out", "shift"].includes(type) || !ts) return res.status(400).json({ error: "type (in/out/shift) and ts required" });
     const when = new Date(ts); if (isNaN(when)) return res.status(400).json({ error: "invalid time" });
     if (when.getTime() > Date.now() + 60000) return res.status(400).json({ error: "that time is in the future" });
-    const r = await db(`INSERT INTO tk_requests (employee,type,req_ts,reason,status) VALUES ($1,$2,$3,$4,'pending') RETURNING id`, [u.name, type, when.toISOString(), (reason || "").slice(0, 500)]);
+    let endWhen = null;
+    if (type === "shift") {
+      if (!end) return res.status(400).json({ error: "shift end time required" });
+      endWhen = new Date(end); if (isNaN(endWhen)) return res.status(400).json({ error: "invalid end time" });
+      if (endWhen <= when) return res.status(400).json({ error: "shift end must be after the start" });
+      if (endWhen - when > 24 * 3600000) return res.status(400).json({ error: "a shift can't be longer than 24 hours" });
+    }
+    const r = await db(`INSERT INTO tk_requests (employee,type,req_ts,end_ts,reason,status) VALUES ($1,$2,$3,$4,$5,'pending') RETURNING id`,
+      [u.name, type, when.toISOString(), endWhen ? endWhen.toISOString() : null, (reason || "").slice(0, 500)]);
     const cfg = await getConfig();
-    const nice = new Intl.DateTimeFormat("en-US", { timeZone: cfg.tz, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(when);
-    slackPost(`⏱️ *Time correction request* — needs your approval · #${r.rows[0].id}\n*${u.name}* asks to clock *${type.toUpperCase()}* at *${nice}*${reason ? `\nReason: ${reason}` : ""}\nApprove in the Time Clock app → Requests.`);
+    const fmt = (d) => new Intl.DateTimeFormat("en-US", { timeZone: cfg.tz, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(d);
+    const what = type === "shift"
+      ? `work a *full shift* from *${fmt(when)}* to *${new Intl.DateTimeFormat("en-US", { timeZone: cfg.tz, hour: "numeric", minute: "2-digit" }).format(endWhen)}*`
+      : `clock *${type.toUpperCase()}* at *${fmt(when)}*`;
+    slackPost(`⏱️ *Time correction request* — needs your approval · #${r.rows[0].id}\n*${u.name}* asks to ${what}${reason ? `\nReason: ${reason}` : ""}\nApprove in the Time Clock app → Requests.`);
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get("/api/my-requests", async (req, res) => {
   const u = await guard(req, res); if (!u) return;
-  try { const r = await db(`SELECT id,type,req_ts,reason,status,decided_by,decided_at,created_at FROM tk_requests WHERE lower(employee)=lower($1) ORDER BY created_at DESC LIMIT 50`, [u.name]); res.json({ requests: r.rows }); }
+  try { const r = await db(`SELECT id,type,req_ts,end_ts,reason,status,decided_by,decided_at,created_at FROM tk_requests WHERE lower(employee)=lower($1) ORDER BY created_at DESC LIMIT 50`, [u.name]); res.json({ requests: r.rows }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -325,6 +354,21 @@ app.post("/api/employees", async (req, res) => {
         email=COALESCE($4,tk_employees.email), phone=COALESCE($5,tk_employees.phone)`,
       [String(name).trim(), hourly_rate ?? 0, active, email ?? null, phone ?? null]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Admin: add a full shift (a paired IN+OUT) in one shot — from clock times or a set number of hours.
+app.post("/api/admin-shift", async (req, res) => {
+  const u = await guard(req, res, true); if (!u) return;
+  try {
+    const { employee, start, end } = req.body || {};
+    if (!employee || !start || !end) return res.status(400).json({ error: "employee, start, end required" });
+    const s = new Date(start), e = new Date(end);
+    if (isNaN(s) || isNaN(e)) return res.status(400).json({ error: "invalid times" });
+    if (e <= s) return res.status(400).json({ error: "end must be after start" });
+    if (e - s > 24 * 3600000) return res.status(400).json({ error: "a shift can't be longer than 24 hours" });
+    await db(`INSERT INTO tk_punches (employee,type,ts,source,note,edited_by) VALUES ($1,'in',$2,'manual',$3,$4),($1,'out',$5,'manual',$3,$4)`,
+      [employee, s.toISOString(), "added by supervisor", u.name, e.toISOString()]);
+    res.json({ ok: true, hours: Math.round((e - s) / 3600000 * 100) / 100 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post("/api/employee-delete", async (req, res) => {
@@ -382,8 +426,8 @@ app.get("/api/requests", async (req, res) => {
   try {
     const status = req.query.status || "pending";
     const r = status === "all"
-      ? await db(`SELECT id,employee,type,req_ts,reason,status,decided_by,decided_at,created_at FROM tk_requests ORDER BY (status='pending') DESC, created_at DESC LIMIT 200`)
-      : await db(`SELECT id,employee,type,req_ts,reason,status,decided_by,decided_at,created_at FROM tk_requests WHERE status=$1 ORDER BY created_at DESC LIMIT 200`, [status]);
+      ? await db(`SELECT id,employee,type,req_ts,end_ts,reason,status,decided_by,decided_at,created_at FROM tk_requests ORDER BY (status='pending') DESC, created_at DESC LIMIT 200`)
+      : await db(`SELECT id,employee,type,req_ts,end_ts,reason,status,decided_by,decided_at,created_at FROM tk_requests WHERE status=$1 ORDER BY created_at DESC LIMIT 200`, [status]);
     const pending = (await db(`SELECT COUNT(*)::int n FROM tk_requests WHERE status='pending'`)).rows[0].n;
     res.json({ requests: r.rows, pending });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -398,9 +442,18 @@ app.post("/api/request-decision", async (req, res) => {
     if (!rq) return res.status(404).json({ error: "request not found" });
     if (rq.status !== "pending") return res.status(400).json({ error: `already ${rq.status}` });
     if (approve) {
-      const ins = await db(`INSERT INTO tk_punches (employee,type,ts,source,note,edited_by) VALUES ($1,$2,$3,'manual',$4,$5) RETURNING id`,
-        [rq.employee, rq.type, new Date(rq.req_ts).toISOString(), `approved request #${id}`, u.name]);
-      await db(`UPDATE tk_requests SET status='approved', decided_by=$1, decided_at=now(), punch_id=$2 WHERE id=$3`, [u.name, ins.rows[0].id, id]);
+      const note = `approved request #${id}`;
+      if (rq.type === "shift") {
+        const insIn = await db(`INSERT INTO tk_punches (employee,type,ts,source,note,edited_by) VALUES ($1,'in',$2,'manual',$3,$4) RETURNING id`,
+          [rq.employee, new Date(rq.req_ts).toISOString(), note, u.name]);
+        await db(`INSERT INTO tk_punches (employee,type,ts,source,note,edited_by) VALUES ($1,'out',$2,'manual',$3,$4)`,
+          [rq.employee, new Date(rq.end_ts).toISOString(), note, u.name]);
+        await db(`UPDATE tk_requests SET status='approved', decided_by=$1, decided_at=now(), punch_id=$2 WHERE id=$3`, [u.name, insIn.rows[0].id, id]);
+      } else {
+        const ins = await db(`INSERT INTO tk_punches (employee,type,ts,source,note,edited_by) VALUES ($1,$2,$3,'manual',$4,$5) RETURNING id`,
+          [rq.employee, rq.type, new Date(rq.req_ts).toISOString(), note, u.name]);
+        await db(`UPDATE tk_requests SET status='approved', decided_by=$1, decided_at=now(), punch_id=$2 WHERE id=$3`, [u.name, ins.rows[0].id, id]);
+      }
     } else {
       await db(`UPDATE tk_requests SET status='denied', decided_by=$1, decided_at=now() WHERE id=$2`, [u.name, id]);
     }
