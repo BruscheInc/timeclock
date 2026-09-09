@@ -327,6 +327,17 @@ app.post("/api/employees", async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.post("/api/employee-delete", async (req, res) => {
+  if (!(await guard(req, res, true))) return;
+  try {
+    const { name, purge } = req.body || {};
+    if (!name) return res.status(400).json({ error: "name required" });
+    await db(`DELETE FROM tk_employees WHERE lower(name)=lower($1)`, [name]);
+    await db(`DELETE FROM tk_requests WHERE lower(employee)=lower($1)`, [name]);
+    if (purge) await db(`DELETE FROM tk_punches WHERE lower(employee)=lower($1)`, [name]); // optional: also erase punch history
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get("/api/timesheet", async (req, res) => {
   if (!(await guard(req, res, true))) return;
   try { res.json(await computeTimesheet(req.query.from, req.query.to, req.query.employee || null)); }
