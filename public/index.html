@@ -644,7 +644,8 @@ async function loadEmps(){ try{ const d=await api("/api/employees"); EMPS=d.empl
         <div class="row"><span class="muted">$</span><input type="number" value="${e.hourly_rate}" style="width:78px" onchange="setRate('${esc(e.name)}',this.value)"></div></div>
       <div class="acts"><button class="btn sm grow" onclick="openSend(${i})">📲 Send setup</button>
         <button class="btn sec sm" onclick="editContact(${i})">Edit contact</button>
-        <button class="btn sec sm" onclick="toggleEmp('${esc(e.name)}',${e.active===false})">${e.active===false?'Enable':'Disable'}</button></div></div>`;
+        <button class="btn sec sm" onclick="toggleEmp('${esc(e.name)}',${e.active===false})">${e.active===false?'Enable':'Disable'}</button>
+        <button class="btn danger sm" onclick="deleteEmp(${i})">Delete</button></div></div>`;
   }).join("")
     : '<div class="empty"><div class="ic">👥</div>No employees yet — add one above.</div>';
 }catch(e){} }
@@ -655,6 +656,11 @@ async function addEmp(){ const name=$("empName").value.trim(); const rate=Number
   }catch(e){} }
 async function setRate(name,val){ try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,hourly_rate:Number(val)||0})}); toast("Rate updated","ok"); }catch(e){} }
 async function toggleEmp(name,makeActive){ try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,active:makeActive})}); loadEmps(); }catch(e){} }
+async function deleteEmp(i){ const e=EMPS[i];
+  if(!confirm(`Permanently delete ${e.name}?\n\nThis removes the employee and ALL of their time records and requests. This cannot be undone.\n\n(To just stop someone from clocking in without losing their history, use Disable instead.)`))return;
+  try{ const r=await api("/api/employee-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name:e.name,purge:true})});
+    if(r.error){toast(r.error,true);return;} toast(e.name+" deleted","ok"); loadEmps();
+  }catch(err){toast("Delete failed",true);} }
 async function editContact(i){ const e=EMPS[i];
   const email=prompt("Email for "+e.name+" (leave blank to clear):", e.email||""); if(email===null)return;
   const phone=prompt("Phone for "+e.name+" (leave blank to clear):", e.phone||""); if(phone===null)return;
