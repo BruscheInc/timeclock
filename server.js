@@ -74,6 +74,11 @@ async function migrate() {
   await db(`ALTER TABLE tk_config ADD COLUMN IF NOT EXISTS pay_anchor DATE`);
   await db(`ALTER TABLE tk_config ADD COLUMN IF NOT EXISTS pay_period_days INTEGER DEFAULT 14`);
   await db(`ALTER TABLE tk_config ADD COLUMN IF NOT EXISTS pay_offset_days INTEGER DEFAULT 2`);
+  await db(`ALTER TABLE tk_config ADD COLUMN IF NOT EXISTS address TEXT`);
+  await db(`ALTER TABLE tk_config ADD COLUMN IF NOT EXISTS geo_seeded BOOLEAN DEFAULT false`);
+  // One-time seed of the work location (701 E Plano Pkwy, Suite 103) — runs once, never overrides a later change.
+  await db(`UPDATE tk_config SET lat=33.008252659169, lng=-96.705134404769, radius_m=COALESCE(radius_m,150),
+    address='701 E Plano Pkwy, Suite 103, Plano, TX 75074', geo_seeded=true WHERE id=1 AND geo_seeded IS NOT TRUE`);
   // Enforce the Brusche schedule: Wednesday work week + the known pay anchor.
   await db(`UPDATE tk_config SET week_start=3 WHERE id=1`);
   await db(`UPDATE tk_config SET pay_anchor='2026-09-02' WHERE id=1 AND pay_anchor IS NULL`);
@@ -94,14 +99,25 @@ async function migrate() {
   await db(`CREATE INDEX IF NOT EXISTS idx_req_status ON tk_requests(status, created_at DESC)`);
 }
 async function getConfig() {
-  const r = await db(`SELECT lat,lng,radius_m,week_start,tz,company,ot_multiplier,pay_anchor,pay_period_days,pay_offset_days FROM tk_config WHERE id=1`);
+  const r = await db(`SELECT lat,lng,radius_m,week_start,tz,company,ot_multiplier,pay_anchor,pay_period_days,pay_offset_days,address FROM tk_config WHERE id=1`);
   const c = r.rows[0] || {};
   return {
     lat: c.lat ?? null, lng: c.lng ?? null, radius_m: c.radius_m ?? 150, week_start: c.week_start ?? 3,
     tz: c.tz || "America/Chicago", company: c.company || "Brusche", ot_multiplier: Number(c.ot_multiplier) || 1.5,
     pay_anchor: c.pay_anchor ? new Date(c.pay_anchor).toISOString().slice(0, 10) : "2026-09-02",
-    pay_period_days: c.pay_period_days || 14, pay_offset_days: c.pay_offset_days ?? 2,
+    pay_period_days: c.pay_period_days || 14, pay_offset_days: c.pay_offset_days ?? 2, address: c.address || null,
   };
+}
+// Geocode a street address to lat/lng via the free US Census geocoder (no API key). Suite/unit tokens are stripped.
+function geocodeAddress(address) {
+  return new Promise((resolve, reject) => {
+    const clean = String(address).replace(/\b(suite|ste|apt|unit|#)\s*[\w-]+/gi, "").replace(/\s{2,}/g, " ").replace(/,\s*,/g, ",").trim();
+    const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(clean)}&benchmark=Public_AR_Current&format=json`;
+    https.get(url, { headers: { "User-Agent": "BruscheTimeClock/1.0" } }, (res) => {
+      let b = ""; res.on("data", (c) => (b += c));
+      res.on("end", () => { try { const j = JSON.parse(b); const m = j.result && j.result.addressMatches && j.result.addressMatches[0]; if (!m) return reject(new Error("no match")); resolve({ lat: m.coordinates.y, lng: m.coordinates.x, matched: m.matchedAddress }); } catch (e) { reject(e); } });
+    }).on("error", reject);
+  });
 }
 // Which biweekly pay period does a date fall in? Returns start/end/payday (all YYYY-MM-DD) + the two work weeks.
 function payPeriodFor(dateStr, cfg) {
@@ -338,6 +354,17 @@ app.post("/api/config", async (req, res) => {
       [lat ?? null, lng ?? null, radius_m ?? null, week_start ?? null, tz ?? null, company ?? null, ot_multiplier ?? null, pay_anchor ?? null, pay_period_days ?? null, pay_offset_days ?? null]);
     res.json(await getConfig());
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Admin: set the geofence from a street address (geocoded server-side).
+app.post("/api/geofence-address", async (req, res) => {
+  if (!(await guard(req, res, true))) return;
+  try {
+    const { address } = req.body || {};
+    if (!address || !String(address).trim()) return res.status(400).json({ error: "address required" });
+    const g = await geocodeAddress(address);
+    await db(`UPDATE tk_config SET lat=$1, lng=$2, address=$3, geo_seeded=true, updated_at=now() WHERE id=1`, [g.lat, g.lng, String(address).trim()]);
+    res.json({ ok: true, lat: g.lat, lng: g.lng, matched: g.matched });
+  } catch (e) { res.status(502).json({ error: "Couldn't locate that address — include city, state and ZIP and try again." }); }
 });
 app.get("/api/employees", async (req, res) => {
   if (!(await guard(req, res, true))) return;
