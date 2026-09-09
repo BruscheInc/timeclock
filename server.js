@@ -40,8 +40,11 @@ async function migrate() {
     login_key TEXT,
     hourly_rate NUMERIC(10,2) DEFAULT 0,
     active BOOLEAN DEFAULT true,
+    email TEXT, phone TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
   )`);
+  await db(`ALTER TABLE tk_employees ADD COLUMN IF NOT EXISTS email TEXT`);
+  await db(`ALTER TABLE tk_employees ADD COLUMN IF NOT EXISTS phone TEXT`);
   await db(`CREATE TABLE IF NOT EXISTS tk_punches (
     id BIGSERIAL PRIMARY KEY,
     employee TEXT NOT NULL,
@@ -309,17 +312,18 @@ app.post("/api/config", async (req, res) => {
 });
 app.get("/api/employees", async (req, res) => {
   if (!(await guard(req, res, true))) return;
-  const r = await db(`SELECT name, hourly_rate, active FROM tk_employees ORDER BY name`);
+  const r = await db(`SELECT name, hourly_rate, active, email, phone FROM tk_employees ORDER BY name`);
   res.json({ employees: r.rows, admins: ADMINS.map((a) => a.name) });
 });
 app.post("/api/employees", async (req, res) => {
   if (!(await guard(req, res, true))) return;
   try {
-    const { name, hourly_rate, active } = req.body || {};
+    const { name, hourly_rate, active, email, phone } = req.body || {};
     if (!name) return res.status(400).json({ error: "name required" });
-    await db(`INSERT INTO tk_employees (name,hourly_rate,active) VALUES ($1,$2,COALESCE($3,true))
-      ON CONFLICT (name) DO UPDATE SET hourly_rate=COALESCE($2,tk_employees.hourly_rate), active=COALESCE($3,tk_employees.active)`,
-      [String(name).trim(), hourly_rate ?? 0, active]);
+    await db(`INSERT INTO tk_employees (name,hourly_rate,active,email,phone) VALUES ($1,$2,COALESCE($3,true),$4,$5)
+      ON CONFLICT (name) DO UPDATE SET hourly_rate=COALESCE($2,tk_employees.hourly_rate), active=COALESCE($3,tk_employees.active),
+        email=COALESCE($4,tk_employees.email), phone=COALESCE($5,tk_employees.phone)`,
+      [String(name).trim(), hourly_rate ?? 0, active, email ?? null, phone ?? null]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
