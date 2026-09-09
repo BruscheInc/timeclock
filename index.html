@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0f172a" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<title>Brusche Time Clock</title>
+<style>
+  :root{
+    --bg:#eef1f6; --surface:#ffffff; --surface2:#f7f9fc; --line:#e3e8f0; --line2:#eef2f7;
+    --ink:#0f172a; --ink2:#475569; --muted:#94a3b8;
+    --brand:#4f46e5; --brand-ink:#ffffff; --brand-soft:#eef0fe;
+    --in:#0ea472; --in-soft:#e6f7f0; --out:#e11d48; --out-soft:#fdeaef;
+    --amber:#b45309; --amber-soft:#fdf4e3; --blue:#2563eb;
+    --shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.06);
+    --shadow-lg:0 12px 40px rgba(15,23,42,.12);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --r:16px; --r-sm:11px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif;-webkit-text-size-adjust:100%}
+  body{padding-bottom:88px}
+  h1,h2,h3{margin:0;font-weight:700;letter-spacing:-.01em}
+  button{font:inherit;cursor:pointer}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .muted{color:var(--muted)} .ink2{color:var(--ink2)}
+  .hidden{display:none!important} .center{text-align:center}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* header */
+  header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.86);backdrop-filter:saturate(180%) blur(14px);-webkit-backdrop-filter:saturate(180%) blur(14px);
+    border-bottom:1px solid var(--line);padding:calc(10px + env(safe-area-inset-top)) 18px 10px;display:flex;align-items:center;gap:12px}
+  .brandmark{display:flex;align-items:center;gap:9px}
+  .brandmark .dot{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#6366f1,#4f46e5);display:grid;place-items:center;color:#fff;font-size:15px;box-shadow:0 4px 12px rgba(79,70,229,.35)}
+  .brandmark .t{font-weight:800;letter-spacing:-.02em;font-size:15px}
+  .brandmark .t small{display:block;font-weight:600;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:-1px}
+  .who{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px}
+  .avatar{width:34px;height:34px;border-radius:50%;background:var(--brand-soft);color:var(--brand);display:grid;place-items:center;font-weight:800;font-size:14px}
+  .who .nm{font-weight:700;line-height:1.15} .who .rl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  .who a{color:var(--muted);font-size:12px;text-decoration:none;border:1px solid var(--line);padding:4px 9px;border-radius:999px}
+
+  .wrap{max-width:680px;margin:0 auto;padding:18px}
+  .page-title{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:2px 2px 14px}
+  .page-title small{display:block;font-size:13px;font-weight:500;color:var(--muted);letter-spacing:0;margin-top:3px}
+
+  /* buttons */
+  .btn{background:var(--brand);color:var(--brand-ink);border:none;border-radius:var(--r-sm);padding:12px 16px;font-weight:700;font-size:14.5px;transition:transform .05s,box-shadow .15s;box-shadow:0 4px 12px rgba(79,70,229,.22)}
+  .btn:active{transform:translateY(1px)} .btn:disabled{opacity:.45;box-shadow:none}
+  .btn.sec{background:var(--surface);color:var(--ink);border:1px solid var(--line);box-shadow:var(--shadow)}
+  .btn.ghost{background:transparent;color:var(--brand);border:1px solid var(--brand-soft);box-shadow:none}
+  .btn.ok{background:var(--in);box-shadow:0 4px 12px rgba(14,164,114,.25)}
+  .btn.danger{background:var(--out);box-shadow:0 4px 12px rgba(225,29,72,.22)}
+  .btn.sm{padding:8px 12px;font-size:13px;border-radius:9px;box-shadow:none}
+  .btn.wide{width:100%}
+
+  /* cards */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-bottom:14px;box-shadow:var(--shadow)}
+  .card.pad0{padding:0;overflow:hidden}
+  .sectlabel{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:700;margin:20px 2px 9px}
+  .sectlabel:first-child{margin-top:0}
+
+  /* clock hero */
+  .hero{position:relative;text-align:center;padding:30px 20px 24px;border:1px solid var(--line);border-radius:20px;background:
+    radial-gradient(120% 90% at 50% -10%, #ffffff 0%, var(--surface2) 70%);box-shadow:var(--shadow);overflow:hidden;margin-bottom:14px}
+  .hero .ring{width:150px;height:150px;margin:6px auto 14px;border-radius:50%;display:grid;place-items:center;position:relative}
+  .hero .ring svg{position:absolute;inset:0;transform:rotate(-90deg)}
+  .hero .ring .inner{text-align:center}
+  .statuschip{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:5px 12px;border-radius:999px}
+  .statuschip .led{width:8px;height:8px;border-radius:50%}
+  .statuschip.in{background:var(--in-soft);color:var(--in)} .statuschip.in .led{background:var(--in);box-shadow:0 0 0 3px rgba(14,164,114,.18)}
+  .statuschip.out{background:var(--surface2);color:var(--ink2)} .statuschip.out .led{background:var(--muted)}
+  .bigclock{font-size:34px;font-weight:800;letter-spacing:-.02em;line-height:1;margin-top:6px}
+  .elapsed{font-size:13px;color:var(--muted);margin-top:6px}
+  .punch{width:100%;max-width:320px;margin:20px auto 0;padding:18px;border-radius:16px;font-size:18px;font-weight:800;border:none;color:#fff;transition:transform .05s}
+  .punch:active{transform:translateY(1px)} .punch:disabled{opacity:.6}
+  .punch.in{background:linear-gradient(135deg,#10b981,#0ea472);box-shadow:0 10px 24px rgba(14,164,114,.3)}
+  .punch.out{background:linear-gradient(135deg,#f43f5e,#e11d48);box-shadow:0 10px 24px rgba(225,29,72,.28)}
+  .geo{font-size:12px;margin-top:14px;color:var(--muted);display:flex;align-items:center;justify-content:center;gap:6px}
+
+  /* stat grid */
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 12px;text-align:center;box-shadow:var(--shadow)}
+  .stat .v{font-size:20px;font-weight:800;letter-spacing:-.02em} .stat .v small{font-size:12px;font-weight:600;color:var(--muted)}
+  .stat .k{font-size:11px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+  .stat.ot .v{color:var(--amber)}
+
+  /* metrics list */
+  .metric{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line2);font-size:14.5px} .metric:last-child{border:none}
+  .metric b{font-weight:700}
+
+  /* forms */
+  label{font-size:12px;color:var(--ink2);display:block;margin:12px 0 5px;font-weight:600}
+  input,select,textarea{width:100%;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:11px 12px;font-size:15px;font-family:inherit}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+  input[type=datetime-local]{min-height:44px}
+  .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+  .row > *{flex:0 0 auto} .grow{flex:1 1 auto;min-width:0}
+  .field{flex:1 1 140px;min-width:0}
+
+  /* pay-period switcher */
+  .pp{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 12px;box-shadow:var(--shadow);margin-bottom:14px}
+  .pp .nav{width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface2);display:grid;place-items:center;font-size:18px;color:var(--ink2)}
+  .pp .lbl{text-align:center;flex:1} .pp .lbl .d{font-weight:800;font-size:15px;letter-spacing:-.01em} .pp .lbl .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .payday{display:inline-flex;align-items:center;gap:6px;background:var(--brand-soft);color:var(--brand);font-weight:700;font-size:12px;padding:4px 10px;border-radius:999px;margin-top:5px}
+
+  /* week breakdown */
+  .weekbar{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line2)} .weekbar:last-child{border:none}
+  .weekbar .wk{flex:1} .weekbar .wk .t{font-weight:700;font-size:14px} .weekbar .wk .s{font-size:11.5px;color:var(--muted);margin-top:1px}
+  .weekbar .h{text-align:right} .weekbar .h .tot{font-weight:800;font-size:15px}
+  .otbadge{display:inline-block;background:var(--amber-soft);color:var(--amber);font-weight:700;font-size:11px;padding:2px 8px;border-radius:999px;margin-left:6px}
+  .bar{height:6px;border-radius:999px;background:var(--line2);overflow:hidden;margin-top:6px;display:flex}
+  .bar .reg{background:var(--brand)} .bar .ot{background:var(--amber)}
+
+  /* table */
+  .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  td,th{padding:11px 10px;border-bottom:1px solid var(--line2);text-align:left;white-space:nowrap} th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;background:var(--surface2)}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums} tbody tr:last-child td{border-bottom:none}
+  tfoot td{border-top:2px solid var(--line);font-weight:800;background:var(--surface2)}
+
+  /* pills / badges */
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700}
+  .pill.ok{background:var(--in-soft);color:var(--in)} .pill.no{background:var(--out-soft);color:var(--out)}
+  .pill.warn{background:var(--amber-soft);color:var(--amber)} .pill.info{background:var(--brand-soft);color:var(--brand)} .pill.mut{background:var(--surface2);color:var(--muted)}
+
+  /* request cards */
+  .reqcard{border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:11px;background:var(--surface2)}
+  .reqcard .top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .reqcard .who2{font-weight:700} .reqcard .when{font-size:13.5px;color:var(--ink2);margin-top:3px}
+  .reqcard .rsn{font-size:13px;color:var(--muted);margin-top:6px;font-style:italic}
+  .reqcard .acts{display:flex;gap:8px;margin-top:12px}
+
+  /* empty */
+  .empty{text-align:center;color:var(--muted);padding:34px 16px}
+  .empty .ic{font-size:34px;opacity:.5;margin-bottom:8px}
+
+  /* punch rows (admin edit) */
+  .prow{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line2)} .prow:last-child{border:none}
+  .prow .dir{width:64px;font-weight:800;font-size:12px;letter-spacing:.04em} .prow .dir.in{color:var(--in)} .prow .dir.out{color:var(--out)}
+  .prow .tm{flex:1;font-size:13.5px} .prow .tm small{color:var(--muted);display:block;font-size:11.5px}
+
+  /* toast */
+  .toast{position:fixed;left:50%;transform:translateX(-50%) translateY(10px);bottom:100px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;font-weight:600;z-index:80;opacity:0;transition:.25s;pointer-events:none;max-width:90vw;text-align:center;box-shadow:var(--shadow-lg)} .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.bad{background:var(--out)} .toast.ok{background:var(--in)}
+
+  /* modal */
+  .scrim{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:90;display:none;align-items:flex-end;justify-content:center;padding:0} .scrim.show{display:flex}
+  .sheet{background:var(--surface);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom));box-shadow:var(--shadow-lg);max-height:88vh;overflow:auto}
+  @media(min-width:560px){ .scrim{align-items:center} .sheet{border-radius:20px;margin-bottom:0} }
+  .sheet h3{font-size:18px;margin-bottom:4px} .sheet .sub{color:var(--muted);font-size:13.5px;margin-bottom:14px}
+  .sheet .x{float:right;border:none;background:var(--surface2);width:32px;height:32px;border-radius:50%;font-size:18px;color:var(--ink2)}
+
+  /* bottom nav */
+  nav.tabs{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);display:flex;z-index:40;padding-bottom:env(safe-area-inset-bottom)}
+  nav.tabs button{flex:1;background:none;border:none;color:var(--muted);padding:9px 0 10px;font-size:10.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative}
+  nav.tabs button .i{font-size:20px;line-height:1} nav.tabs button.on{color:var(--brand)}
+  nav.tabs button .nbadge{position:absolute;top:4px;left:calc(50% + 8px);min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--out);color:#fff;font-size:10px;font-weight:800;display:grid;place-items:center}
+
+  /* keygate */
+  .keyprompt{max-width:380px;margin:0 auto;padding:16vh 24px 24px;text-align:center}
+  .keyprompt .dot{width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#6366f1,#4f46e5);display:grid;place-items:center;color:#fff;font-size:26px;margin:0 auto 16px;box-shadow:0 10px 28px rgba(79,70,229,.4)}
+  .keyprompt h2{font-size:22px} .keyprompt p{color:var(--muted);font-size:14px;margin:8px 0 20px}
+  .keyprompt input{text-align:center;font-size:16px;margin-bottom:12px}
+</style>
+</head>
+<body>
+
+<div id="keygate" class="keyprompt hidden">
+  <div class="dot">⏱</div>
+  <h2>Brusche Time Clock</h2>
+  <p id="gateMsg">Enter your username to sign in.</p>
+  <input id="keyInput" placeholder="username" autocapitalize="off" autocorrect="off" onkeydown="if(event.key==='Enter')saveKey()" />
+  <button class="btn wide" onclick="saveKey()">Sign in</button>
+</div>
+
+<div id="appwrap" class="hidden">
+<header>
+  <div class="brandmark"><div class="dot">⏱</div><div class="t">Time Clock<small>Brusche Inc.</small></div></div>
+  <div class="who">
+    <div style="text-align:right"><div class="nm" id="whoName">…</div><div class="rl" id="roleTag"></div></div>
+    <div class="avatar" id="avatar">–</div>
+    <a href="#" onclick="signOut();return false">Sign out</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- ============ CLOCK ============ -->
+  <section id="tab-clock">
+    <div class="hero">
+      <div class="statuschip out" id="statusChip"><span class="led"></span><span id="statusTxt">—</span></div>
+      <div class="bigclock" id="liveClock">—</div>
+      <div class="elapsed" id="elapsedLbl"></div>
+      <button class="punch out" id="punchBtn" onclick="punch()">Loading…</button>
+      <div class="geo" id="geoLbl"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="sToday">—</div><div class="k">Today</div></div>
+      <div class="stat"><div class="v" id="sWeek">—</div><div class="k">This week</div></div>
+      <div class="stat ot"><div class="v" id="sOt">—</div><div class="k">OT this wk</div></div>
+    </div>
+    <div class="card">
+      <div class="metric"><span class="ink2">This period so far</span><b id="sPeriodHrs">—</b></div>
+      <div class="metric"><span class="ink2">Estimated gross</span><b id="sPeriodPay">—</b></div>
+      <div class="metric"><span class="ink2">Next payday</span><b id="sPayday">—</b></div>
+    </div>
+    <button class="btn sec wide" onclick="openRequest()">✋ I forgot to clock in/out — request a fix</button>
+  </section>
+
+  <!-- ============ MY TIME ============ -->
+  <section id="tab-mytime" class="hidden">
+    <div class="page-title">My Time<small id="mtSub">Pay period</small></div>
+    <div class="pp">
+      <button class="nav" onclick="ppShift(-1)">‹</button>
+      <div class="lbl"><div class="d" id="ppLbl">—</div><div class="s" id="ppSub"></div><span class="payday" id="ppPayday"></span></div>
+      <button class="nav" onclick="ppShift(1)">›</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="mtReg">—</div><div class="k">Regular</div></div>
+      <div class="stat ot"><div class="v" id="mtOt">—</div><div class="k">Overtime</div></div>
+      <div class="stat"><div class="v" id="mtPay">—</div><div class="k">Est. gross</div></div>
+    </div>
+    <div class="card">
+      <div class="sectlabel" style="margin-top:0">Weekly breakdown</div>
+      <div id="mtWeeks"><div class="muted center" style="padding:12px">Loading…</div></div>
+    </div>
+    <div class="card" id="mtDaysCard">
+      <div class="sectlabel" style="margin-top:0">Daily hours</div>
+      <div id="mtDays"></div>
+    </div>
+  </section>
+
+  <!-- ============ REQUESTS (shared: employee submit + admin approve) ============ -->
+  <section id="tab-requests" class="hidden">
+    <div class="page-title">Requests<small id="reqSub">Time corrections</small></div>
+
+    <div id="adminReqZone" class="hidden">
+      <div class="row" style="margin-bottom:12px">
+        <button class="btn sec sm" id="rfPending" onclick="loadAdminReqs('pending')">Pending</button>
+        <button class="btn sec sm" id="rfAll" onclick="loadAdminReqs('all')">All</button>
+      </div>
+      <div id="adminReqs"><div class="muted center" style="padding:12px">Loading…</div></div>
+    </div>
+
+    <div id="myReqZone" class="hidden">
+      <button class="btn wide" onclick="openRequest()" style="margin-bottom:14px">✋ New correction request</button>
+      <div class="sectlabel" style="margin-top:0">Your requests</div>
+      <div id="myReqs"></div>
+    </div>
+  </section>
+
+  <!-- ============ TEAM (admin) ============ -->
+  <section id="tab-team" class="hidden">
+    <div class="page-title">Team<small>Payroll timesheet by pay period</small></div>
+    <div class="pp">
+      <button class="nav" onclick="tppShift(-1)">‹</button>
+      <div class="lbl"><div class="d" id="tppLbl">—</div><div class="s" id="tppSub"></div><span class="payday" id="tppPayday"></span></div>
+      <button class="nav" onclick="tppShift(1)">›</button>
+    </div>
+    <div id="teamRes" class="card"><div class="muted center" style="padding:12px">Loading…</div></div>
+    <button class="btn ok wide" onclick="exportCsv()">⬇︎ Export payroll CSV</button>
+  </section>
+
+  <!-- ============ SETUP (admin) ============ -->
+  <section id="tab-setup" class="hidden">
+    <div class="page-title">Setup<small>Work location, schedule & people</small></div>
+
+    <div class="card">
+      <div class="sectlabel" style="margin-top:0">Work location (geofence)</div>
+      <div id="geoStatus" class="ink2" style="font-size:13.5px;margin-bottom:10px"></div>
+      <button class="btn wide" onclick="setGeoHere()">📍 Set to my current location</button>
+      <label>Allowed radius (meters)</label>
+      <div class="row"><input id="radius" type="number" class="field" value="150"><button class="btn sec" onclick="saveRadius()">Save</button></div>
+    </div>
+
+    <div class="card">
+      <div class="sectlabel" style="margin-top:0">Pay schedule</div>
+      <div class="metric" style="padding-top:0"><span class="ink2">Work week</span><b id="cfgWeek">Wednesday → Tuesday</b></div>
+      <label>Work week starts on</label>
+      <select id="weekStart">
+        <option value="3">Wednesday</option><option value="1">Monday</option><option value="0">Sunday</option>
+        <option value="6">Saturday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="2">Tuesday</option>
+      </select>
+      <label>Pay period anchor (start of a known period)</label>
+      <input id="payAnchor" type="date">
+      <div class="row" style="margin-top:8px">
+        <div class="field"><label style="margin-top:0">Period length (days)</label><input id="payDays" type="number" value="14"></div>
+        <div class="field"><label style="margin-top:0">Payday offset (days after end)</label><input id="payOffset" type="number" value="2"></div>
+      </div>
+      <label>Overtime multiplier (after 40 hrs/week)</label>
+      <input id="otMult" type="number" step="0.1" value="1.5">
+      <button class="btn wide" style="margin-top:14px" onclick="saveSchedule()">Save schedule</button>
+    </div>
+
+    <div class="card">
+      <div class="sectlabel" style="margin-top:0">Add employee</div>
+      <input id="empName" placeholder="Name (this is their login)">
+      <div class="row" style="margin-top:9px">
+        <input id="empEmail" class="field" type="email" autocapitalize="off" placeholder="Email (optional)">
+        <input id="empPhone" class="field" type="tel" placeholder="Phone (optional)">
+      </div>
+      <div class="row" style="margin-top:9px">
+        <input id="empRate" type="number" placeholder="$/hr" style="width:110px">
+        <button class="btn grow" onclick="addEmp()">Add employee</button>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:8px">Add an email or phone so you can send them setup instructions with one tap.</div>
+    </div>
+    <div class="card">
+      <div class="sectlabel" style="margin-top:0">Team</div>
+      <div id="empList"></div>
+      <div class="muted" style="font-size:12px;margin-top:12px" id="adminsLbl"></div>
+    </div>
+  </section>
+</div>
+
+<nav class="tabs">
+  <button id="nav-clock" class="on" onclick="showTab('clock')"><span class="i">⏱️</span>Clock</button>
+  <button id="nav-mytime" onclick="showTab('mytime')"><span class="i">📅</span>My Time</button>
+  <button id="nav-requests" onclick="showTab('requests')"><span class="i">✋</span>Requests<span class="nbadge hidden" id="reqBadge">0</span></button>
+  <button id="nav-team" class="hidden" onclick="showTab('team')"><span class="i">👥</span>Team</button>
+  <button id="nav-setup" class="hidden" onclick="showTab('setup')"><span class="i">⚙️</span>Setup</button>
+</nav>
+</div>
+
+<!-- request modal -->
+<div class="scrim" id="reqScrim">
+  <div class="sheet">
+    <button class="x" onclick="closeReq()">×</button>
+    <h3>Request a time correction</h3>
+    <div class="sub">Forgot to clock in or out? Submit the correct time — it goes to your supervisor for approval.</div>
+    <label>What happened?</label>
+    <select id="reqType"><option value="in">I forgot to clock IN</option><option value="out">I forgot to clock OUT</option></select>
+    <label>Correct date & time</label>
+    <input id="reqTs" type="datetime-local">
+    <label>Reason (optional)</label>
+    <textarea id="reqReason" rows="2" placeholder="e.g. Phone was dead when I arrived"></textarea>
+    <button class="btn wide" style="margin-top:16px" onclick="submitRequest()">Send request to supervisor</button>
+  </div>
+</div>
+
+<!-- punch review / edit sheet (admin) -->
+<div class="scrim" id="editScrim">
+  <div class="sheet">
+    <button class="x" onclick="closeEdit()">×</button>
+    <h3 id="editTitle">Punches</h3>
+    <div class="sub" id="editSub"></div>
+  </div>
+</div>
+
+<!-- send setup instructions sheet (admin) -->
+<div class="scrim" id="sendScrim">
+  <div class="sheet">
+    <button class="x" onclick="closeSend()">×</button>
+    <h3>Send setup instructions</h3>
+    <div class="sub" id="sendSub"></div>
+    <div id="sendContact"></div>
+    <label>Message preview</label>
+    <textarea id="sendMsg" rows="9" style="font-size:13px;line-height:1.45"></textarea>
+    <div id="sendBtns" style="display:flex;flex-direction:column;gap:9px;margin-top:14px"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const KEY=(function(){try{const u=new URLSearchParams(location.search).get("key");if(u){localStorage.setItem("tc_key",u);return u;}return localStorage.getItem("tc_key")||"";}catch(e){return"";}})();
+const $=(id)=>document.getElementById(id);
+const money=(n)=>"$"+(Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=(s)=>String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hrs=(n)=>(Number(n)||0).toFixed(2);
+function toast(m,kind){const t=$("toast");t.textContent=m;t.className="toast show"+(kind?" "+kind:"");clearTimeout(t._t);t._t=setTimeout(()=>t.className="toast",2800);}
+function saveKey(){const v=$("keyInput").value.trim();if(!v)return;try{localStorage.setItem("tc_key",v);}catch(e){}location.href=location.pathname+"?key="+encodeURIComponent(v);}
+function signOut(){try{localStorage.removeItem("tc_key");}catch(e){}location.href=location.pathname;}
+async function api(p,opts){opts=opts||{};const u=p+(p.includes("?")?"&":"?")+"key="+encodeURIComponent(KEY);const r=await fetch(u,opts);if(r.status===401){toast("Session expired — sign in again",true);throw new Error("401");}return r.json();}
+let ROLE=null, USER="";
+
+/* date helpers (all period math is done in local wall-clock of the browser, dates are YYYY-MM-DD) */
+function isoLocal(d){ const z=new Date(d.getTime()-d.getTimezoneOffset()*60000); return z.toISOString().slice(0,10); }
+function fmtMD(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("en-US",{month:"short",day:"numeric"}); }
+function fmtMDY(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); }
+function fmtWkday(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}); }
+
+if(!KEY){ $("keygate").classList.remove("hidden"); }
+else {(async()=>{
+  let role=null; try{ role=await (await fetch("/api/role?key="+encodeURIComponent(KEY))).json(); }catch(e){}
+  if(role&&role.ok){
+    ROLE=role.role; USER=role.user;
+    $("appwrap").classList.remove("hidden");
+    $("whoName").textContent=USER; $("roleTag").textContent=ROLE==="admin"?"Supervisor":"Employee";
+    $("avatar").textContent=(USER||"?").trim().charAt(0).toUpperCase();
+    if(ROLE==="admin"){ $("nav-team").classList.remove("hidden"); $("nav-setup").classList.remove("hidden"); $("reqSub").textContent="Approve employee corrections"; }
+    if("serviceWorker" in navigator){ let reloaded=false; navigator.serviceWorker.addEventListener("controllerchange",()=>{ if(reloaded)return; reloaded=true; location.reload(); }); window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{})); }
+    startClock(); refreshState(); refreshBadge();
+    setInterval(()=>{ if(!document.hidden && !$("tab-clock").classList.contains("hidden")) refreshState(); }, 30000);
+    setInterval(refreshBadge, 60000);
+  } else {
+    try{localStorage.removeItem("tc_key");}catch(e){}
+    $("keygate").classList.remove("hidden"); $("gateMsg").textContent="That username isn't recognized — check with your supervisor.";
+  }
+})();}
+
+function showTab(t){
+  for(const x of ["clock","mytime","requests","team","setup"]){ const s=$("tab-"+x); if(s)s.classList.toggle("hidden",x!==t); const n=$("nav-"+x); if(n)n.classList.toggle("on",x===t); }
+  if(t==="mytime"){ loadMyTime(); }
+  if(t==="requests"){ loadRequestsTab(); }
+  if(t==="team"){ loadTeam(); }
+  if(t==="setup"){ loadConfig(); loadEmps(); }
+}
+
+/* ---------- live clock ---------- */
+function startClock(){ const tick=()=>{ $("liveClock").textContent=new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",second:"2-digit"}); }; tick(); setInterval(tick,1000); }
+
+/* ---------- clock state ---------- */
+let SINCE=null, ELTIMER=null, STATE="out";
+async function refreshState(){
+  try{ const d=await api("/api/state");
+    STATE=d.state; SINCE=d.since; const inNow=d.state==="in";
+    const chip=$("statusChip"); chip.className="statuschip "+(inNow?"in":"out"); $("statusTxt").textContent=inNow?"Clocked in":"Clocked out";
+    const b=$("punchBtn"); b.textContent=inNow?"Clock OUT":"Clock IN"; b.className="punch "+(inNow?"out":"in"); b.disabled=false;
+    $("sToday").innerHTML=hrs(d.today_hours)+'<small> h</small>';
+    $("geoLbl").innerHTML=d.geofence_set?`📍 Within ${d.radius_m} m of ${esc(d.company||"work")} required`:`⚠️ Geofence not set — ask your supervisor`;
+    updateElapsed(); clearInterval(ELTIMER); if(inNow) ELTIMER=setInterval(updateElapsed,1000);
+    loadClockSummary();
+  }catch(e){}
+}
+function updateElapsed(){ const l=$("elapsedLbl"); if(STATE==="in"&&SINCE){ const s=Math.floor((Date.now()-new Date(SINCE))/1000); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60; l.textContent=`On the clock · ${h}h ${String(m).padStart(2,"0")}m ${String(ss).padStart(2,"0")}s`; } else { l.textContent=SINCE?("Last out "+new Date(SINCE).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})):""; } }
+async function loadClockSummary(){
+  try{
+    const today=isoLocal(new Date());
+    const pp=await api("/api/pay-period?date="+today); const cur=pp.current;
+    const ts=await api("/api/my-timesheet?from="+cur.start+"&to="+cur.end); const me=ts.employees&&ts.employees[0];
+    // this week within the period
+    let wk=null; if(me&&me.weeks){ wk=me.weeks.find(w=> today>=w.week_start ) ; wk=me.weeks.slice().reverse().find(w=> today>=w.week_start ) || (me.weeks[me.weeks.length-1]); }
+    $("sWeek").innerHTML=(wk?hrs(wk.hours):"0.00")+'<small> h</small>';
+    $("sOt").innerHTML=(wk&&wk.ot?hrs(wk.ot):"0.00")+'<small> h</small>';
+    $("sPeriodHrs").textContent=(me?hrs(me.total_hours):"0.00")+" h"+(me&&me.ot_hours?`  ·  ${hrs(me.ot_hours)} OT`:"");
+    $("sPeriodPay").textContent=me?money(me.gross_pay):"$0.00";
+    $("sPayday").textContent=fmtMDY(cur.payday);
+  }catch(e){}
+}
+function punch(){
+  const b=$("punchBtn"); b.disabled=true; const was=b.textContent; b.textContent="Getting location…";
+  if(!navigator.geolocation){ toast("This device can't provide location",true); b.disabled=false; b.textContent=was; return; }
+  navigator.geolocation.getCurrentPosition(async(pos)=>{
+    const {latitude,longitude,accuracy}=pos.coords;
+    try{ const r=await api("/api/punch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,lat:latitude,lng:longitude,accuracy})});
+      if(r.error){ toast(r.error,"bad"); } else { toast("Clocked "+r.type.toUpperCase()+(r.distance_m!=null?` · ${r.distance_m} m away`:""),"ok"); }
+    }catch(e){ toast("Punch failed",true); }
+    b.disabled=false; refreshState();
+  },(err)=>{ toast("Location needed to punch: "+err.message,true); b.disabled=false; b.textContent=was; }, {enableHighAccuracy:true,timeout:12000,maximumAge:0});
+}
+
+/* ---------- My Time (pay-period) ---------- */
+let mtOffset=0; // 0=current period, -1 prev, +1 next
+async function loadMyTime(){
+  try{
+    const base=periodBaseDate(mtOffset);
+    const pp=await api("/api/pay-period?date="+base); const per=pp.current;
+    $("ppLbl").textContent=fmtMD(per.start)+" – "+fmtMDY(per.end);
+    $("ppSub").textContent=mtOffset===0?"Current pay period":(mtOffset<0?"Previous period":"Upcoming period");
+    $("ppPayday").innerHTML="💵 Paid "+fmtMDY(per.payday);
+    const ts=await api("/api/my-timesheet?from="+per.start+"&to="+per.end); const me=ts.employees&&ts.employees[0];
+    $("mtReg").innerHTML=(me?hrs(me.reg_hours):"0.00")+'<small> h</small>';
+    $("mtOt").innerHTML=(me?hrs(me.ot_hours):"0.00")+'<small> h</small>';
+    $("mtPay").textContent=me?money(me.gross_pay):"$0.00";
+    // weeks
+    const weeks=(me&&me.weeks)||per.weeks.map(w=>({week_start:w.start,hours:0,reg:0,ot:0}));
+    // ensure both weeks of the period appear even with 0 hrs
+    const wmap={}; weeks.forEach(w=>wmap[w.week_start]=w);
+    const full=per.weeks.map(w=> wmap[w.start] || {week_start:w.start,hours:0,reg:0,ot:0} );
+    $("mtWeeks").innerHTML=full.map(w=>{
+      const wend=per.weeks.find(x=>x.start===w.week_start); const endIso=wend?wend.end:w.week_start;
+      const pctReg=w.hours?Math.round(Math.min(w.reg,40)/Math.max(w.hours,40)*100):0;
+      const pctOt=w.hours?Math.round(w.ot/Math.max(w.hours,40)*100):0;
+      return `<div class="weekbar"><div class="wk"><div class="t">${fmtMD(w.week_start)} – ${fmtMD(endIso)}</div><div class="s">Regular ${hrs(w.reg)} h${w.ot?` · OT ${hrs(w.ot)} h`:""}</div>
+        <div class="bar"><div class="reg" style="width:${pctReg}%"></div><div class="ot" style="width:${pctOt}%"></div></div></div>
+        <div class="h"><div class="tot">${hrs(w.hours)} h</div>${w.ot?`<span class="otbadge">+${hrs(w.ot)} OT</span>`:""}</div></div>`;
+    }).join("");
+    // days
+    const days=(me&&me.days)||[];
+    $("mtDaysCard").style.display=days.length?"":"none";
+    $("mtDays").innerHTML=days.length?days.map(d=>`<div class="metric"><span>${fmtWkday(d.day)}</span><b>${hrs(d.hours)} h</b></div>`).join(""):"";
+  }catch(e){ $("mtWeeks").innerHTML='<div class="muted center">Could not load.</div>'; }
+}
+function periodBaseDate(off){
+  // step ~14 days per offset from today to land inside the target period
+  const d=new Date(); d.setDate(d.getDate()+off*14); return isoLocal(d);
+}
+function ppShift(n){ mtOffset+=n; loadMyTime(); }
+
+/* ---------- Requests tab ---------- */
+function loadRequestsTab(){
+  if(ROLE==="admin"){ $("adminReqZone").classList.remove("hidden"); $("myReqZone").classList.add("hidden"); loadAdminReqs('pending'); }
+  else { $("myReqZone").classList.remove("hidden"); $("adminReqZone").classList.add("hidden"); loadMyReqs(); }
+}
+async function refreshBadge(){
+  if(ROLE!=="admin"){ $("reqBadge").classList.add("hidden"); return; }
+  try{ const d=await api("/api/requests?status=pending"); const n=d.pending||0; const b=$("reqBadge"); if(n>0){ b.textContent=n; b.classList.remove("hidden"); } else b.classList.add("hidden"); }catch(e){}
+}
+function reqStatusPill(s){ return s==="approved"?'<span class="pill ok">Approved</span>':s==="denied"?'<span class="pill no">Denied</span>':'<span class="pill warn">Pending</span>'; }
+async function loadMyReqs(){
+  try{ const d=await api("/api/my-requests");
+    const box=$("myReqs");
+    if(!d.requests||!d.requests.length){ box.innerHTML='<div class="empty"><div class="ic">📭</div>No requests yet.</div>'; return; }
+    box.innerHTML=d.requests.map(r=>`<div class="reqcard"><div class="top"><div><div class="who2">Clock ${r.type.toUpperCase()}</div>
+      <div class="when">${new Date(r.req_ts).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div></div>${reqStatusPill(r.status)}</div>
+      ${r.reason?`<div class="rsn">“${esc(r.reason)}”</div>`:""}
+      ${r.status!=="pending"&&r.decided_by?`<div class="muted" style="font-size:12px;margin-top:8px">${r.status==="approved"?"✓":"✕"} by ${esc(r.decided_by)}</div>`:""}</div>`).join("");
+  }catch(e){ $("myReqs").innerHTML='<div class="muted center">Could not load.</div>'; }
+}
+let reqFilter='pending';
+async function loadAdminReqs(status){
+  reqFilter=status; $("rfPending").className="btn sm "+(status==="pending"?"":"sec"); $("rfAll").className="btn sm "+(status==="all"?"":"sec");
+  const box=$("adminReqs"); box.innerHTML='<div class="muted center" style="padding:12px">Loading…</div>';
+  try{ const d=await api("/api/requests?status="+status); refreshBadge();
+    if(!d.requests||!d.requests.length){ box.innerHTML='<div class="empty"><div class="ic">✅</div>No '+(status==="pending"?"pending":"")+' requests.</div>'; return; }
+    box.innerHTML=d.requests.map(r=>{
+      const when=new Date(r.req_ts).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+      const acts=r.status==="pending"?`<div class="acts"><button class="btn ok sm grow" onclick="decide(${r.id},true)">Approve</button><button class="btn sec sm grow" onclick="decide(${r.id},false)">Deny</button></div>`
+        :`<div class="muted" style="font-size:12px;margin-top:8px">${r.status==="approved"?"✓ Approved":"✕ Denied"}${r.decided_by?` by ${esc(r.decided_by)}`:""}</div>`;
+      return `<div class="reqcard"><div class="top"><div><div class="who2">${esc(r.employee)} · Clock ${r.type.toUpperCase()}</div>
+        <div class="when">${when}</div></div>${reqStatusPill(r.status)}</div>
+        ${r.reason?`<div class="rsn">“${esc(r.reason)}”</div>`:""}${acts}</div>`;
+    }).join("");
+  }catch(e){ box.innerHTML='<div class="muted center">Could not load.</div>'; }
+}
+async function decide(id,approve){
+  try{ const r=await api("/api/request-decision",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,id,approve})});
+    if(r.error){toast(r.error,true);return;} toast(approve?"Approved — punch added":"Request denied","ok"); loadAdminReqs(reqFilter);
+  }catch(e){toast("Failed",true);}
+}
+
+/* ---------- request modal ---------- */
+function openRequest(){ const now=new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset()); $("reqTs").value=now.toISOString().slice(0,16); $("reqType").value=STATE==="in"?"out":"in"; $("reqReason").value=""; $("reqScrim").classList.add("show"); }
+function closeReq(){ $("reqScrim").classList.remove("show"); }
+async function submitRequest(){
+  const type=$("reqType").value, tsv=$("reqTs").value, reason=$("reqReason").value.trim();
+  if(!tsv){ toast("Pick a date & time",true); return; }
+  try{ const r=await api("/api/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,type,ts:new Date(tsv).toISOString(),reason})});
+    if(r.error){toast(r.error,true);return;} closeReq(); toast("Request sent to your supervisor","ok"); if(ROLE!=="admin"&&!$("tab-requests").classList.contains("hidden")) loadMyReqs();
+  }catch(e){toast("Failed to send",true);}
+}
+
+/* ---------- Team (admin, pay-period) ---------- */
+let tppOffset=0;
+async function loadTeam(){
+  const box=$("teamRes"); box.innerHTML='<div class="muted center" style="padding:12px">Loading…</div>';
+  try{
+    const base=periodBaseDate(tppOffset);
+    const pp=await api("/api/pay-period?date="+base); const per=pp.current; window._teamPeriod=per;
+    $("tppLbl").textContent=fmtMD(per.start)+" – "+fmtMDY(per.end);
+    $("tppSub").textContent=tppOffset===0?"Current pay period":(tppOffset<0?"Previous period":"Upcoming period");
+    $("tppPayday").innerHTML="💵 Paid "+fmtMDY(per.payday);
+    const d=await api("/api/timesheet?from="+per.start+"&to="+per.end);
+    if(!d.employees||!d.employees.length){ box.innerHTML='<div class="empty"><div class="ic">🗓️</div>No hours in this period yet.</div>'; return; }
+    let th=0,to=0,tp=0;
+    const rows=d.employees.map(e=>{ th+=e.total_hours; to+=e.ot_hours; tp+=e.gross_pay;
+      return `<tr onclick="openEmp('${esc(e.employee)}')" style="cursor:pointer"><td><b>${esc(e.employee)}</b>${e.currently==="in"?' <span class="pill ok">in</span>':''}</td>
+        <td class="n">${hrs(e.reg_hours)}</td><td class="n">${e.ot_hours?'<span style="color:var(--amber);font-weight:700">'+hrs(e.ot_hours)+'</span>':'0.00'}</td>
+        <td class="n"><b>${hrs(e.total_hours)}</b></td><td class="n">${money(e.gross_pay)}</td></tr>`; }).join("");
+    box.innerHTML=`<div class="tbl-wrap"><table><thead><tr><th>Employee</th><th class="n">Reg</th><th class="n">OT</th><th class="n">Total</th><th class="n">Gross</th></tr></thead>
+      <tbody>${rows}</tbody><tfoot><tr><td>Total</td><td class="n">—</td><td class="n">${hrs(to)}</td><td class="n">${hrs(th)}</td><td class="n">${money(tp)}</td></tr></tfoot></table></div>
+      <div class="muted" style="font-size:12px;margin-top:10px">Tap a name to review or edit their punches.</div>`;
+  }catch(e){ box.innerHTML='<div class="muted center">Error loading.</div>'; }
+}
+function tppShift(n){ tppOffset+=n; loadTeam(); }
+function exportCsv(){ const per=window._teamPeriod; if(!per)return; window.open("/api/export?from="+per.start+"&to="+per.end+"&key="+encodeURIComponent(KEY),"_blank"); }
+
+/* ---------- Employee punch review + edit (admin) ---------- */
+let editEmp=null;
+async function openEmp(emp){
+  editEmp=emp; const per=window._teamPeriod;
+  $("editTitle").textContent=emp+" · punches";
+  $("editSub").innerHTML='<div class="muted center" style="padding:8px">Loading…</div>';
+  $("editScrim").classList.add("show");
+  try{ const d=await api("/api/punches?from="+per.start+"&to="+per.end+"&employee="+encodeURIComponent(emp));
+    renderPunchList(d.punches||[]);
+  }catch(e){ $("editSub").textContent="Could not load punches."; }
+}
+function renderPunchList(punches){
+  const sub=$("editSub");
+  const listHtml = punches.length? punches.map(p=>{
+    const t=new Date(p.ts); const tm=t.toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+    const zone=p.within_zone===false?'<span class="pill no">off-site</span>':(p.edited_by?'<span class="pill info">manual</span>':'');
+    return `<div class="prow"><div class="dir ${p.type}">${p.type.toUpperCase()}</div><div class="tm">${tm}<small>${p.distance_m!=null?Math.round(p.distance_m)+" m":""} ${zone}</small></div>
+      <button class="btn sec sm" onclick="editPunch(${p.id},'${esc(p.type)}','${t.toISOString()}')">Edit</button></div>`;
+  }).join("") : '<div class="empty"><div class="ic">🕘</div>No punches in this period.</div>';
+  sub.innerHTML=`<div style="margin:-4px 0 8px">Add or correct any punch below.</div>
+    <div class="row" style="margin-bottom:10px"><button class="btn ok sm grow" onclick="addAdminPunch('in')">+ Add IN</button><button class="btn danger sm grow" onclick="addAdminPunch('out')">+ Add OUT</button></div>
+    <div>${listHtml}</div>`;
+}
+async function addAdminPunch(type){
+  const now=new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
+  const v=prompt("Time for the "+type.toUpperCase()+" punch (YYYY-MM-DD HH:MM, 24h):", now.toISOString().slice(0,16).replace("T"," "));
+  if(!v)return; const when=new Date(v.replace(" ","T")); if(isNaN(when)){toast("Invalid time",true);return;}
+  try{ await api("/api/admin-punch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,employee:editEmp,type,ts:when.toISOString()})});
+    toast("Punch added","ok"); openEmp(editEmp); loadTeam();
+  }catch(e){toast("Failed",true);}
+}
+let editingPunch=null;
+function editPunch(id,type,iso){
+  editingPunch=id; const d=new Date(iso); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
+  const v=prompt("New time for this "+type.toUpperCase()+" punch (YYYY-MM-DD HH:MM, 24h) — or type DELETE to remove:", d.toISOString().slice(0,16).replace("T"," "));
+  if(v==null)return;
+  if(v.trim().toUpperCase()==="DELETE"){ doDeletePunch(id); return; }
+  const when=new Date(v.replace(" ","T")); if(isNaN(when)){toast("Invalid time",true);return;}
+  api("/api/punch-edit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,id,ts:when.toISOString()})})
+    .then(r=>{ if(r.error){toast(r.error,true);return;} toast("Punch updated","ok"); openEmp(editEmp); loadTeam(); }).catch(()=>toast("Failed",true));
+}
+function doDeletePunch(id){
+  if(!confirm("Delete this punch permanently?"))return;
+  api("/api/punch-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,id})})
+    .then(()=>{ toast("Punch deleted","ok"); openEmp(editEmp); loadTeam(); }).catch(()=>toast("Failed",true));
+}
+function closeEdit(){ $("editScrim").classList.remove("show"); }
+function saveEdit(){} function deletePunch(){}
+
+/* ---------- Setup (admin) ---------- */
+async function loadConfig(){ try{ const c=await api("/api/config");
+  $("geoStatus").innerHTML=c.lat!=null?`✅ Set: ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)} · radius ${c.radius_m} m`:"⚠️ Not set — stand at the work site and tap the button below.";
+  $("radius").value=c.radius_m||150; $("weekStart").value=String(c.week_start??3);
+  $("payAnchor").value=c.pay_anchor||"2026-09-02"; $("payDays").value=c.pay_period_days||14; $("payOffset").value=c.pay_offset_days??2; $("otMult").value=c.ot_multiplier||1.5;
+  const wd=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]; const s=c.week_start??3; const e=(s+6)%7;
+  $("cfgWeek").textContent=wd[s]+" → "+wd[e];
+}catch(e){} }
+function setGeoHere(){ if(!navigator.geolocation){toast("No location on this device",true);return;}
+  toast("Getting location…"); navigator.geolocation.getCurrentPosition(async(pos)=>{
+    try{ await api("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,lat:pos.coords.latitude,lng:pos.coords.longitude})}); toast("Work location set ✓","ok"); loadConfig(); }catch(e){toast("Failed",true);}
+  },(err)=>toast("Location error: "+err.message,true),{enableHighAccuracy:true,timeout:12000,maximumAge:0}); }
+async function saveRadius(){ try{ await api("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,radius_m:Number($("radius").value)||150})}); toast("Radius saved","ok"); loadConfig(); }catch(e){} }
+async function saveSchedule(){ try{ await api("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,
+    week_start:Number($("weekStart").value), pay_anchor:$("payAnchor").value||null, pay_period_days:Number($("payDays").value)||14, pay_offset_days:Number($("payOffset").value)||0, ot_multiplier:Number($("otMult").value)||1.5})});
+  toast("Schedule saved","ok"); loadConfig();
+}catch(e){toast("Failed",true);} }
+let EMPS=[];
+async function loadEmps(){ try{ const d=await api("/api/employees"); EMPS=d.employees||[];
+  $("adminsLbl").textContent="Supervisors (from settings): "+(d.admins||[]).join(", ");
+  $("empList").innerHTML=(EMPS.length)? EMPS.map((e,i)=>{
+    const contact=[e.email?('✉︎ '+esc(e.email)):'', e.phone?('📱 '+esc(e.phone)):''].filter(Boolean).join('  ·  ') || '<span class="muted">no contact info</span>';
+    return `<div class="reqcard" style="background:var(--surface)">
+      <div class="top"><div><div class="who2">${esc(e.name)} ${e.active===false?'<span class="pill no">inactive</span>':''}</div>
+        <div class="when" style="font-size:12.5px">${contact}</div></div>
+        <div class="row"><span class="muted">$</span><input type="number" value="${e.hourly_rate}" style="width:78px" onchange="setRate('${esc(e.name)}',this.value)"></div></div>
+      <div class="acts"><button class="btn sm grow" onclick="openSend(${i})">📲 Send setup</button>
+        <button class="btn sec sm" onclick="editContact(${i})">Edit contact</button>
+        <button class="btn sec sm" onclick="toggleEmp('${esc(e.name)}',${e.active===false})">${e.active===false?'Enable':'Disable'}</button></div></div>`;
+  }).join("")
+    : '<div class="empty"><div class="ic">👥</div>No employees yet — add one above.</div>';
+}catch(e){} }
+async function addEmp(){ const name=$("empName").value.trim(); const rate=Number($("empRate").value)||0;
+  const email=$("empEmail").value.trim(), phone=$("empPhone").value.trim(); if(!name)return;
+  try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,hourly_rate:rate,email:email||null,phone:phone||null})});
+    $("empName").value="";$("empRate").value="";$("empEmail").value="";$("empPhone").value=""; toast("Added "+name,"ok"); loadEmps();
+  }catch(e){} }
+async function setRate(name,val){ try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,hourly_rate:Number(val)||0})}); toast("Rate updated","ok"); }catch(e){} }
+async function toggleEmp(name,makeActive){ try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name,active:makeActive})}); loadEmps(); }catch(e){} }
+async function editContact(i){ const e=EMPS[i];
+  const email=prompt("Email for "+e.name+" (leave blank to clear):", e.email||""); if(email===null)return;
+  const phone=prompt("Phone for "+e.name+" (leave blank to clear):", e.phone||""); if(phone===null)return;
+  try{ await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,name:e.name,email:email.trim(),phone:phone.trim()})}); toast("Contact updated","ok"); loadEmps(); }catch(err){toast("Failed",true);} }
+
+/* ---------- send setup instructions ---------- */
+function empLink(name){ return location.origin+"/?key="+encodeURIComponent(name); }
+function setupMessage(name){ const link=empLink(name);
+  return `Hi ${name}, here's how to set up the Brusche Time Clock on your phone:\n\n`
+    +`1) Open this link on your phone (it signs you in):\n${link}\n\n`
+    +`2) Add it to your home screen so it opens like an app:\n`
+    +`   • iPhone (Safari): tap the Share button, then "Add to Home Screen", then "Add".\n`
+    +`   • Android (Chrome): tap the ⋮ menu, then "Add to Home screen" / "Install app".\n\n`
+    +`3) Open the Time Clock icon from your home screen and allow location — you have to be at work to clock in.\n\n`
+    +`Then just tap the big button to clock IN or OUT. Questions? Reply here.`;
+}
+let sendEmp=null;
+function openSend(i){ const e=EMPS[i]; sendEmp=e;
+  $("sendSub").textContent="Sends "+e.name+" their personal sign-in link and how to add the app to their home screen.";
+  $("sendMsg").value=setupMessage(e.name);
+  const c=$("sendContact"); c.innerHTML="";
+  if(!e.email && !e.phone){ c.innerHTML='<div class="pill warn" style="margin-bottom:10px">No email or phone on file — add one via “Edit contact”, or use Copy / Share below.</div>'; }
+  const btns=$("sendBtns"); const parts=[];
+  const subject="Set up the Brusche Time Clock";
+  if(e.phone){ parts.push(`<button class="btn ok wide" onclick="sendSms()">📱 Text it to ${esc(e.phone)}</button>`); }
+  if(e.email){ parts.push(`<button class="btn wide" onclick="sendEmail()">✉️ Email it to ${esc(e.email)}</button>`); }
+  if(navigator.share){ parts.push(`<button class="btn sec wide" onclick="sendShare()">🔗 Share…</button>`); }
+  parts.push(`<button class="btn sec wide" onclick="copyMsg()">📋 Copy message</button>`);
+  btns.innerHTML=parts.join("");
+  $("sendScrim").classList.add("show");
+}
+function closeSend(){ $("sendScrim").classList.remove("show"); }
+function sendSms(){ const msg=$("sendMsg").value; const num=(sendEmp.phone||"").replace(/[^0-9+]/g,"");
+  // iOS uses & separator, Android uses ? — &body works on both when a number is present
+  location.href="sms:"+num+"?&body="+encodeURIComponent(msg); }
+function sendEmail(){ const msg=$("sendMsg").value; location.href="mailto:"+encodeURIComponent(sendEmp.email)+"?subject="+encodeURIComponent("Set up the Brusche Time Clock")+"&body="+encodeURIComponent(msg); }
+async function sendShare(){ try{ await navigator.share({title:"Brusche Time Clock",text:$("sendMsg").value}); }catch(e){} }
+async function copyMsg(){ try{ await navigator.clipboard.writeText($("sendMsg").value); toast("Copied — paste it into any message","ok"); }catch(e){ toast("Couldn't copy",true); } }
+</script>
+</body>
+</html>
