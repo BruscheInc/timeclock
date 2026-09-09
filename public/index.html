@@ -131,6 +131,8 @@
   .reqcard .who2{font-weight:700} .reqcard .when{font-size:13.5px;color:var(--ink2);margin-top:3px}
   .reqcard .rsn{font-size:13px;color:var(--muted);margin-top:6px;font-style:italic}
   .reqcard .acts{display:flex;gap:8px;margin-top:12px}
+  .reqcard .acts.emp{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .reqcard .acts.emp .btn{width:100%;white-space:nowrap}
 
   /* empty */
   .empty{text-align:center;color:var(--muted);padding:34px 16px}
@@ -172,7 +174,9 @@
   <h2>Brusche Time Clock</h2>
   <p id="gateMsg">Enter your username to sign in.</p>
   <input id="keyInput" placeholder="username" autocapitalize="off" autocorrect="off" onkeydown="if(event.key==='Enter')saveKey()" />
+  <input id="passInput" type="password" class="hidden" placeholder="Supervisor password" autocapitalize="off" onkeydown="if(event.key==='Enter')saveKey()" />
   <button class="btn wide" onclick="saveKey()">Sign in</button>
+  <p style="margin-top:16px"><a href="#" id="supToggle" onclick="toggleSup();return false" style="color:var(--brand);font-size:13px;text-decoration:none;font-weight:600">Sign in as supervisor</a></p>
 </div>
 
 <div id="appwrap" class="hidden">
@@ -328,11 +332,12 @@
   <div class="sheet">
     <button class="x" onclick="closeReq()">×</button>
     <h3>Request a time correction</h3>
-    <div class="sub">Forgot to clock in or out? Submit the correct time — it goes to your supervisor for approval.</div>
+    <div class="sub">Missed a punch or a whole shift? Submit the correct time — it goes to your supervisor for approval.</div>
     <label>What happened?</label>
-    <select id="reqType"><option value="in">I forgot to clock IN</option><option value="out">I forgot to clock OUT</option></select>
-    <label>Correct date & time</label>
+    <select id="reqType" onchange="reqTypeChange()"><option value="in">I forgot to clock IN</option><option value="out">I forgot to clock OUT</option><option value="shift">I missed my entire shift</option></select>
+    <label id="reqTsLbl">Correct date & time</label>
     <input id="reqTs" type="datetime-local">
+    <div id="reqEndWrap" class="hidden"><label>Shift end date & time</label><input id="reqEnd" type="datetime-local"></div>
     <label>Reason (optional)</label>
     <textarea id="reqReason" rows="2" placeholder="e.g. Phone was dead when I arrived"></textarea>
     <button class="btn wide" style="margin-top:16px" onclick="submitRequest()">Send request to supervisor</button>
@@ -345,6 +350,29 @@
     <button class="x" onclick="closeEdit()">×</button>
     <h3 id="editTitle">Punches</h3>
     <div class="sub" id="editSub"></div>
+  </div>
+</div>
+
+<!-- add shift / hours sheet (admin) -->
+<div class="scrim" id="shiftScrim">
+  <div class="sheet">
+    <button class="x" onclick="closeShift()">×</button>
+    <h3>Add hours</h3>
+    <div class="sub" id="shiftSub"></div>
+    <div class="row" style="gap:6px;margin-bottom:6px">
+      <button class="btn sec sm grow" id="modeRange" onclick="shiftMode('range')">By clock times</button>
+      <button class="btn sec sm grow" id="modeHours" onclick="shiftMode('hours')">By total hours</button>
+    </div>
+    <label>Date</label><input id="shiftDate" type="date">
+    <div id="rangeFields">
+      <div class="row"><div class="field"><label>Clock in</label><input id="shiftStart" type="time" value="08:00"></div><div class="field"><label>Clock out</label><input id="shiftEnd" type="time" value="16:00"></div></div>
+      <div class="muted" style="font-size:12px;margin-top:6px">If clock-out is earlier than clock-in, it's treated as an overnight shift.</div>
+    </div>
+    <div id="hoursFields" class="hidden">
+      <label>Hours worked</label><input id="shiftHours" type="number" step="0.25" min="0" placeholder="e.g. 8">
+      <label>Start time (for the record)</label><input id="shiftHoursStart" type="time" value="08:00">
+    </div>
+    <button class="btn wide" style="margin-top:16px" onclick="saveShift()">Add hours</button>
   </div>
 </div>
 
@@ -365,14 +393,16 @@
 
 <script>
 const KEY=(function(){try{const u=new URLSearchParams(location.search).get("key");if(u){localStorage.setItem("tc_key",u);return u;}return localStorage.getItem("tc_key")||"";}catch(e){return"";}})();
+const PASS=(function(){try{const u=new URLSearchParams(location.search).get("pass");if(u){localStorage.setItem("tc_pass",u);return u;}return localStorage.getItem("tc_pass")||"";}catch(e){return"";}})();
 const $=(id)=>document.getElementById(id);
 const money=(n)=>"$"+(Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc=(s)=>String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const hrs=(n)=>(Number(n)||0).toFixed(2);
 function toast(m,kind){const t=$("toast");t.textContent=m;t.className="toast show"+(kind?" "+kind:"");clearTimeout(t._t);t._t=setTimeout(()=>t.className="toast",2800);}
-function saveKey(){const v=$("keyInput").value.trim();if(!v)return;try{localStorage.setItem("tc_key",v);}catch(e){}location.href=location.pathname+"?key="+encodeURIComponent(v);}
-function signOut(){try{localStorage.removeItem("tc_key");}catch(e){}location.href=location.pathname;}
-async function api(p,opts){opts=opts||{};const u=p+(p.includes("?")?"&":"?")+"key="+encodeURIComponent(KEY);const r=await fetch(u,opts);if(r.status===401){toast("Session expired — sign in again",true);throw new Error("401");}return r.json();}
+function saveKey(){const v=$("keyInput").value.trim();if(!v)return;const p=$("passInput")?$("passInput").value:"";try{localStorage.setItem("tc_key",v);if(p)localStorage.setItem("tc_pass",p);else localStorage.removeItem("tc_pass");}catch(e){}location.href=location.pathname;}
+function signOut(){try{localStorage.removeItem("tc_key");localStorage.removeItem("tc_pass");}catch(e){}location.href=location.pathname;}
+function toggleSup(){const pi=$("passInput");pi.classList.toggle("hidden");const on=!pi.classList.contains("hidden");$("gateMsg").textContent=on?"Enter your name and supervisor password.":"Enter your username to sign in.";$("supToggle").textContent=on?"Sign in as employee":"Sign in as supervisor";if(on)pi.focus();}
+async function api(p,opts){opts=opts||{};opts.headers=Object.assign({"x-tc-pass":PASS},opts.headers||{});const u=p+(p.includes("?")?"&":"?")+"key="+encodeURIComponent(KEY);const r=await fetch(u,opts);if(r.status===401){toast("Session expired — sign in again",true);throw new Error("401");}return r.json();}
 let ROLE=null, USER="";
 
 /* date helpers (all period math is done in local wall-clock of the browser, dates are YYYY-MM-DD) */
@@ -383,7 +413,7 @@ function fmtWkday(iso){ const d=new Date(iso+"T00:00:00"); return d.toLocaleDate
 
 if(!KEY){ $("keygate").classList.remove("hidden"); }
 else {(async()=>{
-  let role=null; try{ role=await (await fetch("/api/role?key="+encodeURIComponent(KEY))).json(); }catch(e){}
+  let role=null; try{ role=await (await fetch("/api/role?key="+encodeURIComponent(KEY),{headers:{"x-tc-pass":PASS}})).json(); }catch(e){}
   if(role&&role.ok){
     ROLE=role.role; USER=role.user;
     $("appwrap").classList.remove("hidden");
@@ -395,8 +425,10 @@ else {(async()=>{
     setInterval(()=>{ if(!document.hidden && !$("tab-clock").classList.contains("hidden")) refreshState(); }, 30000);
     setInterval(refreshBadge, 60000);
   } else {
-    try{localStorage.removeItem("tc_key");}catch(e){}
-    $("keygate").classList.remove("hidden"); $("gateMsg").textContent="That username isn't recognized — check with your supervisor.";
+    try{localStorage.removeItem("tc_key");localStorage.removeItem("tc_pass");}catch(e){}
+    $("keygate").classList.remove("hidden");
+    if(role&&role.admin){ $("passInput").classList.remove("hidden"); $("keyInput").value=KEY||""; $("supToggle").textContent="Sign in as employee"; $("gateMsg").textContent=PASS?"Incorrect supervisor password — try again.":"Supervisor — enter your password."; setTimeout(()=>$("passInput").focus(),50); }
+    else { $("gateMsg").textContent="That username isn't recognized — check with your supervisor."; }
   }
 })();}
 
@@ -499,12 +531,17 @@ async function refreshBadge(){
   try{ const d=await api("/api/requests?status=pending"); const n=d.pending||0; const b=$("reqBadge"); if(n>0){ b.textContent=n; b.classList.remove("hidden"); } else b.classList.add("hidden"); }catch(e){}
 }
 function reqStatusPill(s){ return s==="approved"?'<span class="pill ok">Approved</span>':s==="denied"?'<span class="pill no">Denied</span>':'<span class="pill warn">Pending</span>'; }
+function reqTitle(r){ return r.type==="shift"?"Missed shift":("Clock "+r.type.toUpperCase()); }
+function reqWhen(r){ const s=new Date(r.req_ts).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+  if(r.type==="shift"&&r.end_ts){ const e=new Date(r.end_ts); const sameDay=new Date(r.req_ts).toDateString()===e.toDateString();
+    return s+" → "+e.toLocaleString("en-US",sameDay?{hour:"numeric",minute:"2-digit"}:{weekday:"short",hour:"numeric",minute:"2-digit"}); }
+  return s; }
 async function loadMyReqs(){
   try{ const d=await api("/api/my-requests");
     const box=$("myReqs");
     if(!d.requests||!d.requests.length){ box.innerHTML='<div class="empty"><div class="ic">📭</div>No requests yet.</div>'; return; }
-    box.innerHTML=d.requests.map(r=>`<div class="reqcard"><div class="top"><div><div class="who2">Clock ${r.type.toUpperCase()}</div>
-      <div class="when">${new Date(r.req_ts).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div></div>${reqStatusPill(r.status)}</div>
+    box.innerHTML=d.requests.map(r=>`<div class="reqcard"><div class="top"><div><div class="who2">${reqTitle(r)}</div>
+      <div class="when">${reqWhen(r)}</div></div>${reqStatusPill(r.status)}</div>
       ${r.reason?`<div class="rsn">“${esc(r.reason)}”</div>`:""}
       ${r.status!=="pending"&&r.decided_by?`<div class="muted" style="font-size:12px;margin-top:8px">${r.status==="approved"?"✓":"✕"} by ${esc(r.decided_by)}</div>`:""}</div>`).join("");
   }catch(e){ $("myReqs").innerHTML='<div class="muted center">Could not load.</div>'; }
@@ -516,11 +553,10 @@ async function loadAdminReqs(status){
   try{ const d=await api("/api/requests?status="+status); refreshBadge();
     if(!d.requests||!d.requests.length){ box.innerHTML='<div class="empty"><div class="ic">✅</div>No '+(status==="pending"?"pending":"")+' requests.</div>'; return; }
     box.innerHTML=d.requests.map(r=>{
-      const when=new Date(r.req_ts).toLocaleString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
       const acts=r.status==="pending"?`<div class="acts"><button class="btn ok sm grow" onclick="decide(${r.id},true)">Approve</button><button class="btn sec sm grow" onclick="decide(${r.id},false)">Deny</button></div>`
         :`<div class="muted" style="font-size:12px;margin-top:8px">${r.status==="approved"?"✓ Approved":"✕ Denied"}${r.decided_by?` by ${esc(r.decided_by)}`:""}</div>`;
-      return `<div class="reqcard"><div class="top"><div><div class="who2">${esc(r.employee)} · Clock ${r.type.toUpperCase()}</div>
-        <div class="when">${when}</div></div>${reqStatusPill(r.status)}</div>
+      return `<div class="reqcard"><div class="top"><div><div class="who2">${esc(r.employee)} · ${reqTitle(r)}</div>
+        <div class="when">${reqWhen(r)}</div></div>${reqStatusPill(r.status)}</div>
         ${r.reason?`<div class="rsn">“${esc(r.reason)}”</div>`:""}${acts}</div>`;
     }).join("");
   }catch(e){ box.innerHTML='<div class="muted center">Could not load.</div>'; }
@@ -532,12 +568,16 @@ async function decide(id,approve){
 }
 
 /* ---------- request modal ---------- */
-function openRequest(){ const now=new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset()); $("reqTs").value=now.toISOString().slice(0,16); $("reqType").value=STATE==="in"?"out":"in"; $("reqReason").value=""; $("reqScrim").classList.add("show"); }
+function localNow(offsetH){ const d=new Date(); if(offsetH)d.setHours(d.getHours()+offsetH); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,16); }
+function openRequest(){ $("reqTs").value=localNow(0); $("reqEnd").value=localNow(0); $("reqType").value=STATE==="in"?"out":"in"; $("reqReason").value=""; reqTypeChange(); $("reqScrim").classList.add("show"); }
+function reqTypeChange(){ const shift=$("reqType").value==="shift"; $("reqEndWrap").classList.toggle("hidden",!shift); $("reqTsLbl").textContent=shift?"Shift start date & time":"Correct date & time"; if(shift&&$("reqEnd").value<=$("reqTs").value){ const s=new Date($("reqTs").value); s.setHours(s.getHours()+8); s.setMinutes(s.getMinutes()-s.getTimezoneOffset()); $("reqEnd").value=s.toISOString().slice(0,16); } }
 function closeReq(){ $("reqScrim").classList.remove("show"); }
 async function submitRequest(){
   const type=$("reqType").value, tsv=$("reqTs").value, reason=$("reqReason").value.trim();
   if(!tsv){ toast("Pick a date & time",true); return; }
-  try{ const r=await api("/api/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,type,ts:new Date(tsv).toISOString(),reason})});
+  const body={key:KEY,type,ts:new Date(tsv).toISOString(),reason};
+  if(type==="shift"){ const ev=$("reqEnd").value; if(!ev){toast("Enter the shift end time",true);return;} if(new Date(ev)<=new Date(tsv)){toast("End must be after the start",true);return;} body.end=new Date(ev).toISOString(); }
+  try{ const r=await api("/api/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(r.error){toast(r.error,true);return;} closeReq(); toast("Request sent to your supervisor","ok"); if(ROLE!=="admin"&&!$("tab-requests").classList.contains("hidden")) loadMyReqs();
   }catch(e){toast("Failed to send",true);}
 }
@@ -586,8 +626,9 @@ function renderPunchList(punches){
     return `<div class="prow"><div class="dir ${p.type}">${p.type.toUpperCase()}</div><div class="tm">${tm}<small>${p.distance_m!=null?Math.round(p.distance_m)+" m":""} ${zone}</small></div>
       <button class="btn sec sm" onclick="editPunch(${p.id},'${esc(p.type)}','${t.toISOString()}')">Edit</button></div>`;
   }).join("") : '<div class="empty"><div class="ic">🕘</div>No punches in this period.</div>';
-  sub.innerHTML=`<div style="margin:-4px 0 8px">Add or correct any punch below.</div>
-    <div class="row" style="margin-bottom:10px"><button class="btn ok sm grow" onclick="addAdminPunch('in')">+ Add IN</button><button class="btn danger sm grow" onclick="addAdminPunch('out')">+ Add OUT</button></div>
+  sub.innerHTML=`<div style="margin:-4px 0 8px">Add a full shift, or correct any punch below.</div>
+    <div class="row" style="margin-bottom:8px"><button class="btn sm grow" onclick="openShift(editEmp)">➕ Add shift / hours</button></div>
+    <div class="row" style="margin-bottom:10px"><button class="btn sec sm grow" onclick="addAdminPunch('in')">+ Single IN</button><button class="btn sec sm grow" onclick="addAdminPunch('out')">+ Single OUT</button></div>
     <div>${listHtml}</div>`;
 }
 async function addAdminPunch(type){
@@ -614,7 +655,28 @@ function doDeletePunch(id){
     .then(()=>{ toast("Punch deleted","ok"); openEmp(editEmp); loadTeam(); }).catch(()=>toast("Failed",true));
 }
 function closeEdit(){ $("editScrim").classList.remove("show"); }
-function saveEdit(){} function deletePunch(){}
+
+/* ---------- add shift / hours (admin) ---------- */
+let shiftEmpName=null, shiftCurMode="range";
+function openShift(name){ shiftEmpName=name; $("shiftSub").textContent="Add a full shift for "+name+" — by clock times, or a set number of hours."; $("shiftDate").value=isoLocal(new Date()); shiftMode("range"); $("shiftScrim").classList.add("show"); }
+function closeShift(){ $("shiftScrim").classList.remove("show"); }
+function shiftMode(m){ shiftCurMode=m; $("rangeFields").classList.toggle("hidden",m!=="range"); $("hoursFields").classList.toggle("hidden",m!=="hours"); $("modeRange").className="btn sm grow "+(m==="range"?"":"sec"); $("modeHours").className="btn sm grow "+(m==="hours"?"":"sec"); }
+async function saveShift(){
+  const date=$("shiftDate").value; if(!date){ toast("Pick a date",true); return; }
+  let startISO,endISO;
+  if(shiftCurMode==="range"){
+    const s=$("shiftStart").value, e=$("shiftEnd").value; if(!s||!e){ toast("Enter clock-in and clock-out",true); return; }
+    const sd=new Date(date+"T"+s), ed=new Date(date+"T"+e); if(ed<=sd) ed.setDate(ed.getDate()+1); // overnight
+    startISO=sd.toISOString(); endISO=ed.toISOString();
+  } else {
+    const h=Number($("shiftHours").value); if(!h||h<=0){ toast("Enter hours worked",true); return; }
+    const st=$("shiftHoursStart").value||"08:00"; const sd=new Date(date+"T"+st); const ed=new Date(sd.getTime()+h*3600000);
+    startISO=sd.toISOString(); endISO=ed.toISOString();
+  }
+  try{ const r=await api("/api/admin-shift",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:KEY,employee:shiftEmpName,start:startISO,end:endISO})});
+    if(r.error){ toast(r.error,true); return; } closeShift(); toast("Added "+r.hours+" h for "+shiftEmpName,"ok"); if(editEmp)openEmp(editEmp); loadTeam();
+  }catch(e){ toast("Failed",true); }
+}
 
 /* ---------- Setup (admin) ---------- */
 async function loadConfig(){ try{ const c=await api("/api/config");
@@ -642,7 +704,7 @@ async function loadEmps(){ try{ const d=await api("/api/employees"); EMPS=d.empl
       <div class="top"><div><div class="who2">${esc(e.name)} ${e.active===false?'<span class="pill no">inactive</span>':''}</div>
         <div class="when" style="font-size:12.5px">${contact}</div></div>
         <div class="row"><span class="muted">$</span><input type="number" value="${e.hourly_rate}" style="width:78px" onchange="setRate('${esc(e.name)}',this.value)"></div></div>
-      <div class="acts"><button class="btn sm grow" onclick="openSend(${i})">📲 Send setup</button>
+      <div class="acts emp"><button class="btn sm" onclick="openSend(${i})">📲 Send setup</button>
         <button class="btn sec sm" onclick="editContact(${i})">Edit contact</button>
         <button class="btn sec sm" onclick="toggleEmp('${esc(e.name)}',${e.active===false})">${e.active===false?'Enable':'Disable'}</button>
         <button class="btn danger sm" onclick="deleteEmp(${i})">Delete</button></div></div>`;
