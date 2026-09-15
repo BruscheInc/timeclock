@@ -17,17 +17,8 @@ const path = require("path");
 const https = require("https");
 const { Pool } = require("pg");
 
-/* ---- Slack (notify the supervisor of correction requests) ---- */
-const SLACK_TOKEN = process.env.SLACK_BOT_TOKEN || "";
-const TC_CHANNEL = process.env.TIMECLOCK_CHANNEL || process.env.CS_CHANNEL || "";
-function slackPost(text) {
-  if (!SLACK_TOKEN || !TC_CHANNEL) return Promise.resolve();
-  const data = JSON.stringify({ channel: TC_CHANNEL, text });
-  return new Promise((resolve) => {
-    const r = https.request("https://slack.com/api/chat.postMessage", { method: "POST", headers: { Authorization: `Bearer ${SLACK_TOKEN}`, "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(data) } }, (res) => { let b = ""; res.on("data", (c) => (b += c)); res.on("end", () => resolve()); });
-    r.on("error", () => resolve()); r.write(data); r.end();
-  });
-}
+// Time-correction requests are IN-APP ONLY — they surface in the supervisor's Requests tab (with a
+// badge count). Deliberately no Slack/external notification, so nothing goes to #cs-approvals.
 
 /* ------------------------------------------------ Postgres ------------------------------------------------ */
 const DB_URL = process.env.DATABASE_URL || "";
@@ -59,11 +50,11 @@ async function migrate() {
   await db(`CREATE TABLE IF NOT EXISTS tk_config (
     id INT PRIMARY KEY DEFAULT 1,
     lat DOUBLE PRECISION, lng DOUBLE PRECISION, radius_m INTEGER DEFAULT 150,
-    week_start INTEGER DEFAULT 3,      -- 0=Sun .. 6=Sat (Brusche work week starts Wednesday)
+    week_start INTEGER DEFAULT 1,      -- 0=Sun .. 6=Sat (Brusche work week starts Monday)
     tz TEXT DEFAULT 'America/Chicago',
     company TEXT DEFAULT 'Brusche',
     ot_multiplier NUMERIC(4,2) DEFAULT 1.5,
-    pay_anchor DATE DEFAULT '2026-09-02',   -- start of a known biweekly pay period
+    pay_anchor DATE DEFAULT '2026-08-31',   -- start of a known biweekly pay period (Mon 08/31–Sun 09/13, then 09/14–09/27, …)
     pay_period_days INTEGER DEFAULT 14,     -- biweekly
     pay_offset_days INTEGER DEFAULT 2,      -- payday = period end + 2 days (e.g. 09/15 → 09/17)
     updated_at TIMESTAMPTZ DEFAULT now()
@@ -79,9 +70,10 @@ async function migrate() {
   // One-time seed of the work location (701 E Plano Pkwy, Suite 103) — runs once, never overrides a later change.
   await db(`UPDATE tk_config SET lat=33.008252659169, lng=-96.705134404769, radius_m=COALESCE(radius_m,150),
     address='701 E Plano Pkwy, Suite 103, Plano, TX 75074', geo_seeded=true WHERE id=1 AND geo_seeded IS NOT TRUE`);
-  // Enforce the Brusche schedule: Wednesday work week + the known pay anchor.
-  await db(`UPDATE tk_config SET week_start=3 WHERE id=1`);
-  await db(`UPDATE tk_config SET pay_anchor='2026-09-02' WHERE id=1 AND pay_anchor IS NULL`);
+  // Enforce the Brusche schedule: Monday work week + the known pay anchor (08/31–09/13 fortnights).
+  // Both are force-set every boot so the schedule is consistent for everyone; punches/requests are never touched.
+  await db(`UPDATE tk_config SET week_start=1 WHERE id=1`);
+  await db(`UPDATE tk_config SET pay_anchor='2026-08-31' WHERE id=1`);
   await db(`UPDATE tk_config SET pay_period_days=COALESCE(pay_period_days,14), pay_offset_days=COALESCE(pay_offset_days,2), ot_multiplier=COALESCE(ot_multiplier,1.5) WHERE id=1`);
   // Manual-entry / correction requests (employee submits → supervisor approves).
   await db(`CREATE TABLE IF NOT EXISTS tk_requests (
@@ -102,9 +94,9 @@ async function getConfig() {
   const r = await db(`SELECT lat,lng,radius_m,week_start,tz,company,ot_multiplier,pay_anchor,pay_period_days,pay_offset_days,address FROM tk_config WHERE id=1`);
   const c = r.rows[0] || {};
   return {
-    lat: c.lat ?? null, lng: c.lng ?? null, radius_m: c.radius_m ?? 150, week_start: c.week_start ?? 3,
+    lat: c.lat ?? null, lng: c.lng ?? null, radius_m: c.radius_m ?? 150, week_start: c.week_start ?? 1,
     tz: c.tz || "America/Chicago", company: c.company || "Brusche", ot_multiplier: Number(c.ot_multiplier) || 1.5,
-    pay_anchor: c.pay_anchor ? new Date(c.pay_anchor).toISOString().slice(0, 10) : "2026-09-02",
+    pay_anchor: c.pay_anchor ? new Date(c.pay_anchor).toISOString().slice(0, 10) : "2026-08-31",
     pay_period_days: c.pay_period_days || 14, pay_offset_days: c.pay_offset_days ?? 2, address: c.address || null,
   };
 }
@@ -121,7 +113,7 @@ function geocodeAddress(address) {
 }
 // Which biweekly pay period does a date fall in? Returns start/end/payday (all YYYY-MM-DD) + the two work weeks.
 function payPeriodFor(dateStr, cfg) {
-  const anchor = cfg.pay_anchor || "2026-09-02", days = cfg.pay_period_days || 14, off = cfg.pay_offset_days ?? 2;
+  const anchor = cfg.pay_anchor || "2026-08-31", days = cfg.pay_period_days || 14, off = cfg.pay_offset_days ?? 2;
   const a = new Date(anchor + "T00:00:00Z"), d = new Date(dateStr + "T00:00:00Z");
   const idx = Math.floor(Math.floor((d - a) / 86400000) / days);
   const start = new Date(a); start.setUTCDate(a.getUTCDate() + idx * days);
@@ -212,7 +204,7 @@ async function doPunch(emp, wantType, lat, lng, acc) {
 // Pair punches per employee into worked intervals, roll up to CT days and weeks, apply weekly OT>40 and rates.
 async function computeTimesheet(fromDate, toDate, onlyEmp) {
   const cfg = await getConfig();
-  const tz = cfg.tz || "America/Chicago", weekStart = cfg.week_start ?? 3, otMult = cfg.ot_multiplier || 1.5;
+  const tz = cfg.tz || "America/Chicago", weekStart = cfg.week_start ?? 1, otMult = cfg.ot_multiplier || 1.5;
   // pull punches across a padded range (so an interval spanning the boundary still pairs), then filter by IN day.
   const params = [fromDate + "T00:00:00Z", toDate + "T23:59:59Z"];
   let where = `ts >= $1 AND ts <= $2`;
@@ -328,12 +320,7 @@ app.post("/api/request", async (req, res) => {
     }
     const r = await db(`INSERT INTO tk_requests (employee,type,req_ts,end_ts,reason,status) VALUES ($1,$2,$3,$4,$5,'pending') RETURNING id`,
       [u.name, type, when.toISOString(), endWhen ? endWhen.toISOString() : null, (reason || "").slice(0, 500)]);
-    const cfg = await getConfig();
-    const fmt = (d) => new Intl.DateTimeFormat("en-US", { timeZone: cfg.tz, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(d);
-    const what = type === "shift"
-      ? `work a *full shift* from *${fmt(when)}* to *${new Intl.DateTimeFormat("en-US", { timeZone: cfg.tz, hour: "numeric", minute: "2-digit" }).format(endWhen)}*`
-      : `clock *${type.toUpperCase()}* at *${fmt(when)}*`;
-    slackPost(`⏱️ *Time correction request* — needs your approval · #${r.rows[0].id}\n*${u.name}* asks to ${what}${reason ? `\nReason: ${reason}` : ""}\nApprove in the Time Clock app → Requests.`);
+    // In-app only: the request appears in the supervisor's Requests tab (with a badge). No external/Slack notification.
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
