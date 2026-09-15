@@ -285,7 +285,7 @@
 
     <div class="card">
       <div class="sectlabel" style="margin-top:0">Pay schedule</div>
-      <div class="metric" style="padding-top:0"><span class="ink2">Work week</span><b id="cfgWeek">Wednesday → Tuesday</b></div>
+      <div class="metric" style="padding-top:0"><span class="ink2">Work week</span><b id="cfgWeek">Monday → Sunday</b></div>
       <label>Work week starts on</label>
       <select id="weekStart">
         <option value="3">Wednesday</option><option value="1">Monday</option><option value="0">Sunday</option>
@@ -695,9 +695,9 @@ async function saveShift(){
 async function loadConfig(){ try{ const c=await api("/api/config");
   $("geoStatus").innerHTML=c.lat!=null?`✅ ${c.address?esc(c.address):`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`}<br><span class="muted" style="font-size:12px">radius ${c.radius_m} m · ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}</span>`:"⚠️ Not set — enter an address or use your current location.";
   if(c.address&&!$("geoAddr").value) $("geoAddr").value=c.address;
-  $("radius").value=c.radius_m||150; $("weekStart").value=String(c.week_start??3);
-  $("payAnchor").value=c.pay_anchor||"2026-09-02"; $("payDays").value=c.pay_period_days||14; $("payOffset").value=c.pay_offset_days??2; $("otMult").value=c.ot_multiplier||1.5;
-  const wd=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]; const s=c.week_start??3; const e=(s+6)%7;
+  $("radius").value=c.radius_m||150; $("weekStart").value=String(c.week_start??1);
+  $("payAnchor").value=c.pay_anchor||"2026-08-31"; $("payDays").value=c.pay_period_days||14; $("payOffset").value=c.pay_offset_days??2; $("otMult").value=c.ot_multiplier||1.5;
+  const wd=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]; const s=c.week_start??1; const e=(s+6)%7;
   $("cfgWeek").textContent=wd[s]+" → "+wd[e];
 }catch(e){} }
 async function setGeoAddr(){ const a=$("geoAddr").value.trim(); if(!a){ toast("Enter an address",true); return; }
